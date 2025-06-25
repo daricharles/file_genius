@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "951614019398",
+    "project_id": "filegenius-app1",
+    "storage_bucket": "filegenius-app1.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:951614019398:android:721720955ac8c57898f747",
+        "android_client_info": {
+          "package_name": "com.example.file_genius"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "951614019398-0544hs7bk9h89cg8hufq9adhssicbe91.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBmGpNC5emDzio94m0nB7858eaDTm53j9A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "951614019398-0544hs7bk9h89cg8hufq9adhssicbe91.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
