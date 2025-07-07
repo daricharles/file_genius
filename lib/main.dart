@@ -231,190 +231,73 @@ class _HomeScreenState extends State<HomeScreen> {
                 type: p.extension ?? '',
                 uploadedAt: DateTime.now(),
               ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
+            )
+            .toList();
 
-  /* ──────────────────── MAIN PANE ──────────────────── */
-  Widget _buildMainPane() {
-    // Nothing selected yet
-    if (selectedFolder == null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Icon(Icons.folder_open, size: 60, color: Colors.grey),
-            SizedBox(height: 12),
-            Text('No folder selected.', style: TextStyle(color: Colors.grey)),
-          ],
-        ),
-      );
-    }
+    setState(() {
+      _filesByFolder.putIfAbsent(target!.id, () => []).addAll(plats);
+      _selected = target;
+    });
 
-    // A folder is selected → show split panel
-    return Row(
-      children: [
-        // Left: list of files in this folder (+ upload zone)
-        Expanded(
-          flex: 1,
-          child: Column(
-            children: [
-              DottedBorderBox(onPressed: _pickFile),
-              const SizedBox(height: 8),
-              Expanded(child: _buildFileList(selectedFolder!)),
-            ],
-          ),
-        ),
-        const VerticalDivider(width: 1),
-        // Right: placeholder chat/preview panel
-        Expanded(
-          flex: 2,
-          child: Center(
-            child:
-                folderFiles[selectedFolder]!.isEmpty
-                    ? const Text(
-                      'No PDFs yet',
-                      style: TextStyle(color: Colors.black54),
-                    )
-                    : const Text('Chat panel – coming soon'),
-          ),
-        ),
-      ],
-    );
-  }
+    // upload each
+    for (final file in dropped) {
+      try {
+        final ref = FirebaseStorage.instance.ref('$pathPrefix/${file.name}');
+        UploadTask task;
+        if (file.bytes != null) {
+          task = ref.putData(file.bytes!);
+        } else {
+          task = ref.putFile(File(file.path!));
+        }
 
-  Widget _buildFileList(String folder) {
-    final files = folderFiles[folder]!;
-    if (files.isEmpty) {
-      return const Center(
-        child: Text('Empty folder', style: TextStyle(color: Colors.grey)),
-      );
-    }
-    return ListView.separated(
-      itemCount: files.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
-      itemBuilder:
-          (_, i) => ListTile(
-            leading: const Icon(Icons.picture_as_pdf, color: Colors.redAccent),
-            title: Text(files[i]),
-            dense: true,
-          ),
-    );
-  }
+        final snap = await task;
+        final url = await snap.ref.getDownloadURL();
 
-  /* ──────────────────── HOVER BUTTON ─────────────────── */
-  Widget _hoverButton({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
-    required Color color,
-    required Color iconColor,
-    TextStyle? labelStyle,
-  }) {
-    return StatefulBuilder(
-      builder: (context, setState) {
-        bool hover = false;
-        /* ───── inside _hoverButton (replace the AnimatedContainer build) ───── */
-        return MouseRegion(
-          cursor: SystemMouseCursors.click,
-          onEnter: (_) => setState(() => hover = true),
-          onExit: (_) => setState(() => hover = false),
-          child: GestureDetector(
-            onTap: onTap,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-              decoration: BoxDecoration(
-                color: hover ? color.withAlpha((0.85 * 255).round()) : color,
-                borderRadius: BorderRadius.circular(8),
-                boxShadow:
-                    hover
-                        ? [
-                          const BoxShadow(
-                            color: Colors.black26,
-                            blurRadius: 6,
-                            offset: Offset(0, 2),
-                          ),
-                        ]
-                        : [],
-              ),
-              child: Row(
-                children: [
-                  Icon(icon, color: iconColor),
-                  const SizedBox(width: 10),
-                  Text(
-                    label,
-                    style: labelStyle ?? const TextStyle(color: Colors.white),
-                  ),
-                ],
-              ),
-            ),
-          ),
+        final meta = FileMeta(
+          name: file.name,
+          size: file.size,
+          url: url,
+          type: file.extension ?? '',
+          uploadedAt: DateTime.now(),
         );
-      },
-    );
+
+        // replace placeholder
+        setState(() {
+          final list = _filesByFolder[target!.id]!;
+          final idx = list.indexWhere((m) => m.name == file.name);
+          if (idx != -1) list[idx] = meta;
+        });
+
+        await FirebaseFirestore.instance
+            .doc('users/$uid/folders/${target.id}')
+            .collection('files')
+            .add({
+              'name': meta.name,
+              'size': meta.size,
+              'type': meta.type,
+              'url': meta.url,
+              'uploadedAt': FieldValue.serverTimestamp(),
+            });
+      } catch (e) {
+        _showSnack('Failed to upload ${file.name}: $e', isErr: true);
+      }
+    }
   }
-}
 
-/* ────────────────── DOTTED BORDER BOX ────────────────── */
-
-class DottedBorderBox extends StatelessWidget {
-  const DottedBorderBox({super.key, required this.onPressed});
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onPressed,
-      child: Container(
-        height: 160,
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFFE8ECF3),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: Colors.black45,
-            width: 2,
-            style: BorderStyle.solid,
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Icon(Icons.cloud_upload, size: 36, color: Colors.black54),
-            SizedBox(height: 8),
-            Text(
-              'Drag & drop your files here',
-              style: TextStyle(color: Colors.black87),
-            ),
-            SizedBox(height: 4),
-            Text('or'),
-            SizedBox(height: 4),
-            Text(
-              'Click to upload',
-              style: TextStyle(
-                color: Colors.deepPurple,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  // ──────────────────────────────────────────────────  Helpers
+  Future<void> _openFile(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      _showSnack('Cannot open file', isErr: true);
+    }
   }
-}
 
-/* ────────────── Dummy “Upgrade plan” page ────────────── */
-class SubscriptionPage extends StatelessWidget {
-  const SubscriptionPage({super.key});
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Subscription Plans')),
-      body: const Center(child: Text('Choose a plan – coming soon')),
+  void _showSnack(String msg, {bool isErr = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: isErr ? Colors.red : null),
     );
   }
 }
