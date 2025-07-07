@@ -1,227 +1,235 @@
 // main.dart
-import 'package:file_genius/login_page.dart';
-import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
-import 'package:file_picker/file_picker.dart';
-import 'dash_board.dart';
+//
+// Root file – wires Sidebar, MainPane and DragDropZone together.
+// Make sure you have created:
+//
+//   • constants.dart  → kBrand, kHover, kSidebarW
+//   • sideBar.dart    → SideBar     widget (from our earlier step)
+//   • mainPane.dart   → MainPane    widget (uses DragDropZone)
+//   • dragDropZone.dart → DragDropZone widget
+//
+// Firebase is initialized, an auth‑gate shows LoginPage if not signed‑in.
 
-void main() async {
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+// Firebase
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'firebase_options.dart';
+
+// UI pieces you split out
+import 'side_bar.dart';
+import 'constants.dart';
+import 'login_page.dart'; // your login screen // Make sure this file exists and exports SideBar
+import 'main_pane.dart';
+import 'models.dart';
+
+// ──────────────────────────────────────────────────────────────────────────
+//  Entry‑point
+// ──────────────────────────────────────────────────────────────────────────
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  runApp(const MyApp(title: 'FileGenius'));
+  runApp(const FileGeniusApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key, required this.title});
-  final String title;
+// ──────────────────────────────────────────────────────────────────────────
+//  Root – Auth‑gate
+// ──────────────────────────────────────────────────────────────────────────
+
+class FileGeniusApp extends StatelessWidget {
+  const FileGeniusApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      title: 'FileGenius',
       debugShowCheckedModeBanner: false,
-      title: title,
-      theme: ThemeData(primarySwatch: Colors.deepPurple),
-      home: const LoginPage(),
+      theme: ThemeData(colorSchemeSeed: kBrand, useMaterial3: true),
+      home: StreamBuilder<User?>(
+        stream: FirebaseAuth.instance.authStateChanges(),
+        builder: (_, snap) {
+          if (snap.connectionState == ConnectionState.waiting) {
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
+          return snap.data == null ? const LoginPage() : const HomeScreen();
+        },
+      ),
     );
   }
 }
 
-/* ───────────────────────── HOME SCREEN ───────────────────────── */
+// ──────────────────────────────────────────────────────────────────────────
+//  HomeScreen – holds the state (folders / files) and handlers
+// ──────────────────────────────────────────────────────────────────────────
+
+enum HoverTarget { dashboard, newFolder, upload }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required String title});
-
+  const HomeScreen({super.key});
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  /// List of folder names (for simple ordering)
-  final List<String> folders = [];
+  /* ───── in‑memory state ───── */
+  final List<Folder> _folders = [];
+  final Map<String, List<FileMeta>> _filesByFolder = {};
+  Folder? _selected;
 
-  /// Actual files per folder (`folder → [filenames]`)
-  final Map<String, List<String>> folderFiles = {};
+  /* convenience */
+  List<FileMeta> get _selectedFiles =>
+      _selected == null ? const [] : (_filesByFolder[_selected!.id] ?? []);
 
-  String? selectedFolder;
+  // ──────────────────────────────────────────────────  UI  ──────────────
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (_, limits) {
+        final compact = limits.maxWidth < 700;
 
-  // ───────────────── FILE PICK ─────────────────
-  Future<void> _pickFile() async {
-    final result = await FilePicker.platform.pickFiles();
-    if (!mounted || result == null) return;
+        final sidebar = FileGeniusSidebar(
+          folders: _folders,
+          filesByFolder: _filesByFolder,
+          selectedFolderId: _selected?.id,
+          collapsed: {/* your collapsed set if needed */},
+          onDashboardTap: () => _showSnack('Dashboard (todo)'),
+          onCreateFolder: _handleCreateFolder,
+          onUploadFile: _pickFiles,
+          onToggleFolder: (id) {
+            /* your logic */
+          },
+          onSelectFolder: (id) {
+            /* your logic */
+          },
+          onSignOut: () async => FirebaseAuth.instance.signOut(),
+          onUpgradePlan: () {
+            /* your logic */
+          },
+        );
 
-    final fileName = result.files.single.name;
+        final mainPane = MainPane(
+          selectedFolder: _selected,
+          files: _selectedFiles,
+          onPickFiles: _pickFiles,
+          onDropFiles: (files) => _handleDroppedFiles(files, _selected),
+          onOpenUrl: _openFile,
+        );
 
-    if (selectedFolder != null) {
-      // Attach file to the current folder
-      setState(() => folderFiles[selectedFolder]!.add(fileName));
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Added to $selectedFolder: $fileName')),
-      );
-    } else {
-      // No folder selected – just show a message
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Select (or create) a folder first')),
-      );
-    }
+        return Scaffold(
+          drawer: compact ? Drawer(child: sidebar) : null,
+          body:
+              compact
+                  ? mainPane
+                  : Row(
+                    children: [
+                      sidebar,
+                      const VerticalDivider(width: 1),
+                      Expanded(child: mainPane),
+                    ],
+                  ),
+        );
+      },
+    );
   }
 
-  // ──────────────── CREATE FOLDER ───────────────
-  void _createNewFolder() {
-    String folderName = '';
+  // ──────────────────────────────────────────────────  Folder creation
+  void _handleCreateFolder() {
+    final ctl = TextEditingController();
     showDialog(
       context: context,
       builder:
-          (context) => AlertDialog(
-            title: const Text('Create New Folder'),
+          (_) => AlertDialog(
+            title: const Text('Create folder'),
             content: TextField(
+              controller: ctl,
               autofocus: true,
-              onChanged: (v) => folderName = v.trim(),
-              decoration: const InputDecoration(hintText: 'Enter folder name'),
+              decoration: const InputDecoration(hintText: 'Folder name'),
             ),
             actions: [
               TextButton(
-                onPressed: Navigator.of(context).pop,
+                onPressed: () => Navigator.pop(context),
                 child: const Text('Cancel'),
               ),
-              TextButton(
-                child: const Text('Create'),
-                onPressed: () {
-                  if (folderName.isEmpty) return;
+              ElevatedButton(
+                onPressed: () async {
+                  final name = ctl.text.trim();
+                  if (name.isEmpty) return;
+
+                  final f = Folder(
+                    id: DateTime.now().millisecondsSinceEpoch.toString(),
+                    name: name,
+                  );
+
+                  // optimistic UI
                   setState(() {
-                    folders.add(folderName);
-                    folderFiles[folderName] = [];
-                    selectedFolder = folderName; // auto-select
+                    _folders.add(f);
+                    _selected = f;
                   });
-                  Navigator.of(context).pop();
+                  Navigator.pop(context);
+
+                  // persist
+                  final uid = FirebaseAuth.instance.currentUser!.uid;
+                  await FirebaseFirestore.instance
+                      .doc('users/$uid/folders/${f.id}')
+                      .set({
+                        'name': f.name,
+                        'createdAt': FieldValue.serverTimestamp(),
+                      });
                 },
+                child: const Text('Create'),
               ),
             ],
           ),
     );
   }
 
-  // ────────────────────────── BUILD ──────────────────────────
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Row(children: [_buildSidebar(), Expanded(child: _buildMainPane())]),
+  // ──────────────────────────────────────────────────  File picker
+  Future<void> _pickFiles() async {
+    final res = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      withData: true,
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'pptx', 'docx'],
     );
+    if (res != null) _handleDroppedFiles(res.files, _selected);
   }
 
-  /* ─────────────────────── SIDEBAR ─────────────────────── */
-  Widget _buildSidebar() {
-    return Container(
-      width: 260,
-      color: const Color(0xFF4A789C),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            '📘 FileGenius',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 32),
-          _hoverButton(
-            icon: Icons.dashboard,
-            label: 'Dashboard',
-            color: const Color(0xFFFAF7FC),
-            iconColor: const Color(0xFF634F96),
-            labelStyle: const TextStyle(color: Color(0xFF634F96)),
-            onTap:
-                () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const Dashboard()),
-                ),
-          ),
-          const SizedBox(height: 12),
-          _hoverButton(
-            icon: Icons.create_new_folder,
-            label: 'New Folder',
-            color: const Color(0xFF302942),
-            iconColor: Colors.white,
-            onTap: _createNewFolder,
-          ),
-          const SizedBox(height: 12),
-          _hoverButton(
-            icon: Icons.upload_file,
-            label: 'Upload PDF',
-            color: const Color(0xFF302942),
-            iconColor: Colors.white,
-            onTap: _pickFile,
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            'Files & Folders',
-            style: TextStyle(
-              color: Colors.white70,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const Divider(color: Color(0xFFFAF7FC), thickness: 0.5),
-          Expanded(child: _buildFolderList()),
-          const Divider(color: Colors.white30),
-          _buildUserBlock(),
-        ],
-      ),
-    );
-  }
+  // ──────────────────────────────────────────────────  Handle dropped files
+  Future<void> _handleDroppedFiles(
+    List<PlatformFile> dropped,
+    Folder? target,
+  ) async {
+    if (dropped.isEmpty) return;
 
-  Widget _buildFolderList() {
-    if (folders.isEmpty) {
-      return const Center(
-        child: Text('No folders yet', style: TextStyle(color: Colors.white54)),
-      );
-    }
-    return ListView.builder(
-      itemCount: folders.length,
-      itemBuilder: (_, i) {
-        final f = folders[i];
-        final isSel = f == selectedFolder;
-        return ListTile(
-          leading: const Icon(Icons.folder, color: Colors.amber),
-          title: Text(f, style: const TextStyle(color: Colors.white)),
-          selected: isSel,
-          selectedTileColor: Colors.deepPurple.shade200,
-          dense: true,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          onTap: () => setState(() => selectedFolder = f),
-        );
-      },
-    );
-  }
+    target ??=
+        _selected ??
+        (_folders.isEmpty
+            ? (_folders..add(Folder(id: '_root', name: 'Root'))).first
+            : _folders.first);
 
-  Widget _buildUserBlock() {
-    return Row(
-      children: [
-        const CircleAvatar(
-          backgroundImage: AssetImage('assets/images/user.png'),
-          radius: 16,
-        ),
-        const SizedBox(width: 10),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('John Doe', style: TextStyle(color: Colors.white)),
-            GestureDetector(
-              onTap:
-                  () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const SubscriptionPage()),
-                  ),
-              child: const Text(
-                'Upgrade plan',
-                style: TextStyle(
-                  color: Colors.purpleAccent,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  decoration: TextDecoration.underline,
-                ),
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    final pathPrefix = 'users/$uid/folders/${target.id}';
+
+    // optimistic placeholders
+    final plats =
+        dropped
+            .map(
+              (p) => FileMeta(
+                name: p.name,
+                size: p.size,
+                url: 'uploading…',
+                type: p.extension ?? '',
+                uploadedAt: DateTime.now(),
               ),
             ),
           ],
@@ -287,7 +295,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     return ListView.separated(
       itemCount: files.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
+      separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder:
           (_, i) => ListTile(
             leading: const Icon(Icons.picture_as_pdf, color: Colors.redAccent),
@@ -320,12 +328,10 @@ class _HomeScreenState extends State<HomeScreen> {
               duration: const Duration(milliseconds: 120),
               padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
               decoration: BoxDecoration(
-                // ignore: dead_code
                 color: hover ? color.withAlpha((0.85 * 255).round()) : color,
                 borderRadius: BorderRadius.circular(8),
                 boxShadow:
                     hover
-                        // ignore: dead_code
                         ? [
                           const BoxShadow(
                             color: Colors.black26,

@@ -234,20 +234,20 @@ class _SignupPageState extends State<SignupPage> {
                       width: double.infinity,
                       height: 40,
                       child: ElevatedButton.icon(
-                      onPressed: signInWithGoogle,
-                      icon: Image.asset(
-                        'assets/images/google_logo.png',
-                        height: 24.0,
-                      ),
-                      label: const Text('Sign up with Google'),
-                      style: ElevatedButton.styleFrom(
-                        foregroundColor: Colors.black87,
-                        backgroundColor: const Color(0xFFE8EDF5),
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8.0),
+                        onPressed: signInWithGoogle,
+                        icon: Image.asset(
+                          'assets/images/google_logo.png',
+                          height: 24.0,
                         ),
-                      ),
+                        label: const Text('Sign up with Google'),
+                        style: ElevatedButton.styleFrom(
+                          foregroundColor: Colors.black87,
+                          backgroundColor: const Color(0xFFE8EDF5),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
+                        ),
                       ),
                     ),
 
@@ -258,30 +258,30 @@ class _SignupPageState extends State<SignupPage> {
                       width: double.infinity,
                       height: 40,
                       child: ElevatedButton(
-                      onPressed: () async {
-                        if (_formKey.currentState!.validate()) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                          content: Text('Creating account...'),
-                          ),
-                        );
+                        onPressed: () async {
+                          if (_formKey.currentState!.validate()) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Creating account...'),
+                              ),
+                            );
 
-                        await signUp(
-                          _emailController.text.trim(),
-                          _passwordController.text.trim(),
-                          _fullNameController.text.trim(),
-                        );
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        backgroundColor: const Color(0xFF0A87E3),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8.0),
+                            await signUp(
+                              _emailController.text.trim(),
+                              _passwordController.text.trim(),
+                              _fullNameController.text.trim(),
+                            );
+                          }
+                        },
+                        style: ElevatedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          backgroundColor: const Color(0xFF0A87E3),
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
                         ),
-                      ),
-                      child: const Text('Sign up'),
+                        child: const Text('Sign up'),
                       ),
                     ),
 
@@ -293,7 +293,7 @@ class _SignupPageState extends State<SignupPage> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => const HomeScreen(title: '',),
+                            builder: (context) => const HomeScreen(),
                           ),
                         );
                       },

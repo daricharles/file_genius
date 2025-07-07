@@ -52,9 +52,7 @@ class _LoginPageState extends State<LoginPage> {
 
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(
-          builder: (context) => const HomeScreen(title: 'FileGenius'),
-        ),
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
       );
     } on FirebaseAuthException catch (e) {
       setState(() {
@@ -75,9 +73,9 @@ class _LoginPageState extends State<LoginPage> {
 
       final GoogleSignIn googleSignIn = GoogleSignIn(
         clientId:
-            kIsWeb 
-            ? '951614019398-0544hs7bk9h89cg8hufq9adhssicbe91.apps.googleusercontent.com' 
-            : null,
+            kIsWeb
+                ? '951614019398-0544hs7bk9h89cg8hufq9adhssicbe91.apps.googleusercontent.com'
+                : null,
       );
 
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
@@ -95,9 +93,7 @@ class _LoginPageState extends State<LoginPage> {
 
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(
-          builder: (context) => const HomeScreen(title: 'FileGenius'),
-        ),
+        MaterialPageRoute(builder: (context) => const HomeScreen()),
       );
     } catch (e) {
       ScaffoldMessenger.of(

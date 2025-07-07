@@ -29,6 +29,13 @@
             {
               "client_id": "951614019398-0544hs7bk9h89cg8hufq9adhssicbe91.apps.googleusercontent.com",
               "client_type": 3
+            },
+            {
+              "client_id": "951614019398-ko2nhf1suvljt47eo21v3gvjknngpi03.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.fileGenius"
+              }
             }
           ]
         }
