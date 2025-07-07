@@ -287,7 +287,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     return ListView.separated(
       itemCount: files.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
+      separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder:
           (_, i) => ListTile(
             leading: const Icon(Icons.picture_as_pdf, color: Colors.redAccent),
@@ -320,10 +320,12 @@ class _HomeScreenState extends State<HomeScreen> {
               duration: const Duration(milliseconds: 120),
               padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
               decoration: BoxDecoration(
+                // ignore: dead_code
                 color: hover ? color.withAlpha((0.85 * 255).round()) : color,
                 borderRadius: BorderRadius.circular(8),
                 boxShadow:
                     hover
+                        // ignore: dead_code
                         ? [
                           const BoxShadow(
                             color: Colors.black26,
