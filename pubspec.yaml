@@ -40,6 +40,11 @@ dependencies:
   # ─── File picker (federated, includes web / desktop stubs) ───
   file_picker:       ^6.1.1
 
+  # ─── File viewer (for PPT, PDf, and Docx files.) ───
+  pdfx: ^2.6.0            # or any recent version
+  http: ^1.2.1            # <— NEW (for downloading the PDF)
+  webview_flutter: ^4.5.0 # already present in your project
+
   # ─── Other libs ───
   google_sign_in:    ^6.2.1
   url_launcher:      ^6.2.6

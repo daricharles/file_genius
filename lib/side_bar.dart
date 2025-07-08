@@ -1,49 +1,51 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'constants.dart'; // in side_bar.dart
+
+import 'constants.dart';
 import 'models.dart';
 
-/// -----------------------------------------------------------------///
-/// Sidebar ✨
-/// -----------------------------------------------------------------///
-/// * `folders`              – List of user folders
-// ignore: unintended_html_in_doc_comment
-/// * `filesByFolder`        – Map<folderId, List<FileMeta>> for nesting
-/// * `selectedFolderId`     – Currently highlighted folder
-// ignore: unintended_html_in_doc_comment
-/// * `collapsed`            – Set<folderId> that are collapsed
-/// * Callbacks for user actions (create, upload, select,…)
+/// Pure UI – no Firebase calls.
 class FileGeniusSidebar extends StatelessWidget {
   const FileGeniusSidebar({
     super.key,
+    // data
     required this.folders,
+    required this.topLevelFiles,
     required this.filesByFolder,
     required this.selectedFolderId,
     required this.collapsed,
+
+    // callbacks
     required this.onDashboardTap,
     required this.onCreateFolder,
     required this.onUploadFile,
     required this.onToggleFolder,
-    required this.onSelectFolder,
+    required this.onSelectFolder, // nullable id (= select a folder)
+    required this.onSelectTopFile, // top‑level file click
+    this.onSelectAnyFile, // 🔸 NEW – fires for *any* file
     required this.onSignOut,
     required this.onUpgradePlan,
   });
 
-  /// Data
+  // ───────── DATA ─────────
   final List<Folder> folders;
+  final List<FileMeta> topLevelFiles;
   final Map<String, List<FileMeta>> filesByFolder;
   final String? selectedFolderId;
-  final Set<String> collapsed;
+  final Set<String> collapsed; // folder‑ids
 
-  /// Callbacks
+  // ───────── CALLBACKS ─────────
   final VoidCallback onDashboardTap;
   final VoidCallback onCreateFolder;
   final VoidCallback onUploadFile;
   final void Function(String folderId) onToggleFolder;
   final void Function(String? folderId) onSelectFolder;
+  final void Function(FileMeta file) onSelectTopFile;
+  final void Function(FileMeta file)? onSelectAnyFile; // 🔸 optional
   final VoidCallback onSignOut;
   final VoidCallback onUpgradePlan;
 
+  // ────────────────────────────────────────── UI tree
   @override
   Widget build(BuildContext context) => Container(
     width: kSidebarW,
@@ -52,7 +54,8 @@ class FileGeniusSidebar extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const _AppHeader(),
-        // ── core nav buttons ──
+
+        // Core nav
         _SidebarButton(
           icon: Icons.dashboard,
           label: 'Dashboard',
@@ -68,46 +71,37 @@ class FileGeniusSidebar extends StatelessWidget {
           label: 'Upload File',
           onTap: onUploadFile,
         ),
+
         const Divider(),
         const Padding(
           padding: EdgeInsets.only(left: 16, top: 8),
           child: Text('Files & Folders', style: TextStyle(color: Colors.grey)),
         ),
-        // ── dynamic folders / files list ──
+
+        // Scrollable tree
         Expanded(
           child: ListView(
             children: [
+              // 1) top‑level (un‑foldered) files
+              ...topLevelFiles.map(_topFileTile),
+
+              // 2) user folders with nested files
               ...folders.map((f) => _buildFolderTile(context, f)),
-              // files not in a folder (folderId == null)
-              if (filesByFolder['__root__']?.isNotEmpty == true)
-                ...filesByFolder['__root__']!.map(
-                  (file) => Padding(
-                    padding: const EdgeInsets.only(left: 16.0),
-                    child: ListTile(
-                      dense: true,
-                      leading: const Icon(Icons.insert_drive_file, size: 18),
-                      title: Text(
-                        file.name,
-                        style: const TextStyle(fontSize: 13),
-                      ),
-                      onTap: () => onSelectFolder(null),
-                    ),
-                  ),
-                ),
             ],
           ),
         ),
+
         const Divider(),
         _UserSection(onSignOut: onSignOut, onUpgradePlan: onUpgradePlan),
       ],
     ),
   );
 
-  /// Folder with expansion arrow + nested files
+  //──────────────────  Tiles  ──────────────────
   Widget _buildFolderTile(BuildContext context, Folder folder) {
     final isCollapsed = collapsed.contains(folder.id);
     final isSelected = selectedFolderId == folder.id;
-    final files = filesByFolder[folder.id] ?? const <FileMeta>[];
+    final kids = filesByFolder[folder.id] ?? const <FileMeta>[];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -116,7 +110,7 @@ class FileGeniusSidebar extends StatelessWidget {
           leading: const Icon(Icons.folder),
           title: Text(folder.name),
           trailing:
-              files.isEmpty
+              kids.isEmpty
                   ? null
                   : Icon(
                     isCollapsed
@@ -126,26 +120,30 @@ class FileGeniusSidebar extends StatelessWidget {
                   ),
           tileColor: isSelected ? kHover : null,
           onTap: () => onSelectFolder(folder.id),
-          onLongPress: files.isEmpty ? null : () => onToggleFolder(folder.id),
+          onLongPress: kids.isEmpty ? null : () => onToggleFolder(folder.id),
         ),
-        if (!isCollapsed)
+
+        if (!isCollapsed && kids.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(left: 16.0),
             child: Column(
               children:
-                  files
+                  kids
                       .map(
                         (f) => ListTile(
                           dense: true,
                           leading: const Icon(
-                            Icons.insert_drive_file,
+                            Icons.insert_drive_file_outlined,
                             size: 18,
                           ),
                           title: Text(
                             f.name,
                             style: const TextStyle(fontSize: 13),
                           ),
-                          onTap: () => onSelectFolder(folder.id),
+                          onTap: () {
+                            // Notify parent about the specific file
+                            onSelectAnyFile?.call(f);
+                          },
                         ),
                       )
                       .toList(),
@@ -154,11 +152,25 @@ class FileGeniusSidebar extends StatelessWidget {
       ],
     );
   }
+
+  /// Top‑level file (no folder)
+  Widget _topFileTile(FileMeta f) => ListTile(
+    dense: true,
+    leading: const Icon(Icons.insert_drive_file_outlined, size: 18),
+    title: Text(f.name, style: const TextStyle(fontSize: 13)),
+    onTap: () {
+      // legacy callback
+      onSelectTopFile(f);
+      // new unified callback
+      onSelectAnyFile?.call(f);
+    },
+  );
 }
 
-/*──────────────── UI bits ───────────────*/
+/*────────────────── cosmetics ──────────────────*/
 class _AppHeader extends StatelessWidget {
   const _AppHeader();
+
   @override
   Widget build(BuildContext ctx) => Padding(
     padding: const EdgeInsets.all(16),
@@ -202,29 +214,34 @@ class _UserSection extends StatelessWidget {
   final VoidCallback onUpgradePlan;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.all(16),
-    child: Column(
-      children: [
-        CircleAvatar(
-          backgroundColor: kBrand,
-          child: Text(
-            FirebaseAuth.instance.currentUser?.displayName
-                    ?.substring(0, 1)
-                    .toUpperCase() ??
-                'U',
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          CircleAvatar(
+            backgroundColor: kBrand,
+            child: Text(
+              (user?.displayName?.isNotEmpty == true
+                      ? user!.displayName![0]
+                      : 'U')
+                  .toUpperCase(),
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          FirebaseAuth.instance.currentUser?.displayName ??
-              FirebaseAuth.instance.currentUser?.email ??
-              'User',
-          textAlign: TextAlign.center,
-        ),
-        TextButton(onPressed: onUpgradePlan, child: const Text('Upgrade plan')),
-        OutlinedButton(onPressed: onSignOut, child: const Text('Sign out')),
-      ],
-    ),
-  );
+          const SizedBox(height: 8),
+          Text(
+            user?.displayName ?? user?.email ?? 'User',
+            textAlign: TextAlign.center,
+          ),
+          TextButton(
+            onPressed: onUpgradePlan,
+            child: const Text('Upgrade plan'),
+          ),
+          OutlinedButton(onPressed: onSignOut, child: const Text('Sign out')),
+        ],
+      ),
+    );
+  }
 }

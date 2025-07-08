@@ -1,15 +1,9 @@
-// main.dart
+// lib/main.dart
 //
-// Root file – wires Sidebar, MainPane and DragDropZone together.
-// Make sure you have created:
-//
-//   • constants.dart  → kBrand, kHover, kSidebarW
-//   • sideBar.dart    → SideBar     widget (from our earlier step)
-//   • mainPane.dart   → MainPane    widget (uses DragDropZone)
-//   • dragDropZone.dart → DragDropZone widget
-//
-// Firebase is initialized, an auth‑gate shows LoginPage if not signed‑in.
+// Root:  FileGeniusSidebar  ⇆  MainPane  +  FileViewer
+// -----------------------------------------------------
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -23,16 +17,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'firebase_options.dart';
 
-// UI pieces you split out
-import 'side_bar.dart';
+// UI
 import 'constants.dart';
-import 'login_page.dart'; // your login screen // Make sure this file exists and exports SideBar
+import 'login_page.dart';
+import 'side_bar.dart';
 import 'main_pane.dart';
+import 'file_viewer.dart';
 import 'models.dart';
-
-// ──────────────────────────────────────────────────────────────────────────
-//  Entry‑point
-// ──────────────────────────────────────────────────────────────────────────
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -40,10 +31,7 @@ Future<void> main() async {
   runApp(const FileGeniusApp());
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-//  Root – Auth‑gate
-// ──────────────────────────────────────────────────────────────────────────
-
+/*──────────────────────────  Auth‑gate  ──────────────────────────*/
 class FileGeniusApp extends StatelessWidget {
   const FileGeniusApp({super.key});
 
@@ -68,12 +56,7 @@ class FileGeniusApp extends StatelessWidget {
   }
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-//  HomeScreen – holds the state (folders / files) and handlers
-// ──────────────────────────────────────────────────────────────────────────
-
-enum HoverTarget { dashboard, newFolder, upload }
-
+/*──────────────────────────  Home  ───────────────────────────────*/
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -81,69 +64,176 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  /* ───── in‑memory state ───── */
+  /* ── reactive state ───────────────────────────────────────── */
   final List<Folder> _folders = [];
+  final List<FileMeta> _topLevelFiles = [];
   final Map<String, List<FileMeta>> _filesByFolder = {};
-  Folder? _selected;
+  final Set<String> _collapsed = {};
 
-  /* convenience */
-  List<FileMeta> get _selectedFiles =>
-      _selected == null ? const [] : (_filesByFolder[_selected!.id] ?? []);
+  Folder? _selectedFolder; // highlighted in tree
+  FileMeta? _previewFile; // shown in right‑hand viewer
+  late final List<StreamSubscription> _folderSubs;
 
-  // ──────────────────────────────────────────────────  UI  ──────────────
+  /* ── life‑cycle ───────────────────────────────────────────── */
   @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (_, limits) {
-        final compact = limits.maxWidth < 700;
-
-        final sidebar = FileGeniusSidebar(
-          folders: _folders,
-          filesByFolder: _filesByFolder,
-          selectedFolderId: _selected?.id,
-          collapsed: {/* your collapsed set if needed */},
-          onDashboardTap: () => _showSnack('Dashboard (todo)'),
-          onCreateFolder: _handleCreateFolder,
-          onUploadFile: _pickFiles,
-          onToggleFolder: (id) {
-            /* your logic */
-          },
-          onSelectFolder: (id) {
-            /* your logic */
-          },
-          onSignOut: () async => FirebaseAuth.instance.signOut(),
-          onUpgradePlan: () {
-            /* your logic */
-          },
-        );
-
-        final mainPane = MainPane(
-          selectedFolder: _selected,
-          files: _selectedFiles,
-          onPickFiles: _pickFiles,
-          onDropFiles: (files) => _handleDroppedFiles(files, _selected),
-          onOpenUrl: _openFile,
-        );
-
-        return Scaffold(
-          drawer: compact ? Drawer(child: sidebar) : null,
-          body:
-              compact
-                  ? mainPane
-                  : Row(
-                    children: [
-                      sidebar,
-                      const VerticalDivider(width: 1),
-                      Expanded(child: mainPane),
-                    ],
-                  ),
-        );
-      },
-    );
+  void initState() {
+    super.initState();
+    _folderSubs = [];
+    _attachFirestoreStreams();
   }
 
-  // ──────────────────────────────────────────────────  Folder creation
-  void _handleCreateFolder() {
+  @override
+  void dispose() {
+    for (final s in _folderSubs) {
+      s.cancel();
+    }
+    super.dispose();
+  }
+
+  /* ── Firestore listeners ──────────────────────────────────── */
+  void _attachFirestoreStreams() {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+
+    // folders
+    FirebaseFirestore.instance
+        .collection('users/$uid/folders')
+        .orderBy('createdAt')
+        .snapshots()
+        .listen((q) {
+          setState(() {
+            _folders
+              ..clear()
+              ..addAll(q.docs.map(Folder.fromDoc));
+          });
+          _rebindFolderFileStreams();
+        });
+
+    // top‑level files
+    FirebaseFirestore.instance
+        .collection('users/$uid/files')
+        .orderBy('uploadedAt')
+        .snapshots()
+        .listen((q) {
+          setState(() {
+            _topLevelFiles
+              ..clear()
+              ..addAll(q.docs.map(FileMeta.fromDoc));
+          });
+        });
+  }
+
+  void _rebindFolderFileStreams() {
+    for (final s in _folderSubs) {
+      s.cancel();
+    }
+    _folderSubs =
+        _folders.map((f) {
+          final uid = FirebaseAuth.instance.currentUser!.uid;
+          return FirebaseFirestore.instance
+              .collection('users/$uid/folders/${f.id}/files')
+              .orderBy('uploadedAt')
+              .snapshots()
+              .listen(
+                (q) => setState(
+                  () =>
+                      _filesByFolder[f.id] =
+                          q.docs.map(FileMeta.fromDoc).toList(),
+                ),
+              );
+        }).toList();
+  }
+
+  /* ── helpers ──────────────────────────────────────────────── */
+  List<FileMeta> get _visibleFiles =>
+      _selectedFolder == null
+          ? _topLevelFiles
+          : (_filesByFolder[_selectedFolder!.id] ?? []);
+
+  void _clearPreview() => setState(() => _previewFile = null);
+
+  /* ── UI build ─────────────────────────────────────────────── */
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (_, dims) {
+      final compact = dims.maxWidth < 700;
+
+      /* Sidebar */
+      final sidebar = FileGeniusSidebar(
+        folders: _folders,
+        topLevelFiles: _topLevelFiles,
+        filesByFolder: _filesByFolder,
+        selectedFolderId: _selectedFolder?.id,
+        collapsed: _collapsed,
+
+        onDashboardTap: () => _snack('Dashboard (todo)'),
+        onCreateFolder: _createFolderDialog,
+        onUploadFile: _pickFiles,
+        onToggleFolder:
+            (id) => setState(() {
+              _collapsed.contains(id)
+                  ? _collapsed.remove(id)
+                  : _collapsed.add(id);
+            }),
+        onSelectFolder:
+            (id) => setState(() {
+              _selectedFolder =
+                  id == null ? null : _folders.firstWhere((f) => f.id == id);
+              _clearPreview();
+            }),
+        // click on a top‑level file → preview it
+        onSelectTopFile: (f) => setState(() => _previewFile = f),
+
+        onSignOut: () async => FirebaseAuth.instance.signOut(),
+        onUpgradePlan: () => _snack('Upgrade plan (todo)'),
+      );
+
+      /* Main list pane (left side of the content area) */
+      final listPane = MainPane(
+        selectedFolder: _selectedFolder,
+        files: _visibleFiles,
+        onPickFiles: _pickFiles,
+        onDropFiles: (fs) => _handleDroppedFiles(fs, _selectedFolder),
+        onOpenUrl: _openUrl,
+      );
+
+      /* Optional right‑hand preview */
+      Widget content;
+      if (_previewFile == null) {
+        content = listPane;
+      } else {
+        // split the space: 50  % list / 50  % viewer
+        content = Row(
+          children: [
+            Expanded(child: listPane),
+            const VerticalDivider(width: 1),
+            Expanded(
+              child: FileViewer(
+                url: _previewFile!.url,
+                type: _previewFile!.type.toLowerCase(),
+              ),
+            ),
+          ],
+        );
+      }
+
+      return Scaffold(
+        drawer: compact ? Drawer(child: sidebar) : null,
+        body:
+            compact
+                ? content
+                : Row(
+                  children: [
+                    sidebar,
+                    const VerticalDivider(width: 1),
+                    Expanded(child: content),
+                  ],
+                ),
+      );
+    },
+  );
+
+  /* ── folder creation dialog ───────────────────────────────── */
+  void _createFolderDialog() {
     final ctl = TextEditingController();
     showDialog(
       context: context,
@@ -169,22 +259,20 @@ class _HomeScreenState extends State<HomeScreen> {
                     id: DateTime.now().millisecondsSinceEpoch.toString(),
                     name: name,
                   );
-
-                  // optimistic UI
                   setState(() {
                     _folders.add(f);
-                    _selected = f;
+                    _selectedFolder = f;
+                    _clearPreview();
                   });
                   Navigator.pop(context);
 
-                  // persist
                   final uid = FirebaseAuth.instance.currentUser!.uid;
-                  await FirebaseFirestore.instance
-                      .doc('users/$uid/folders/${f.id}')
-                      .set({
-                        'name': f.name,
-                        'createdAt': FieldValue.serverTimestamp(),
-                      });
+                  await _safeSet(
+                    FirebaseFirestore.instance.doc(
+                      'users/$uid/folders/${f.id}',
+                    ),
+                    {'name': f.name, 'createdAt': FieldValue.serverTimestamp()},
+                  );
                 },
                 child: const Text('Create'),
               ),
@@ -193,7 +281,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ──────────────────────────────────────────────────  File picker
+  /* ── file picker & uploads ───────────────────────────────── */
   Future<void> _pickFiles() async {
     final res = await FilePicker.platform.pickFiles(
       allowMultiple: true,
@@ -201,103 +289,130 @@ class _HomeScreenState extends State<HomeScreen> {
       type: FileType.custom,
       allowedExtensions: ['pdf', 'pptx', 'docx'],
     );
-    if (res != null) _handleDroppedFiles(res.files, _selected);
+    if (res != null) _handleDroppedFiles(res.files, _selectedFolder);
   }
 
-  // ──────────────────────────────────────────────────  Handle dropped files
   Future<void> _handleDroppedFiles(
     List<PlatformFile> dropped,
     Folder? target,
   ) async {
     if (dropped.isEmpty) return;
+    final folderId = target?.id; // null → top level
 
-    target ??=
-        _selected ??
-        (_folders.isEmpty
-            ? (_folders..add(Folder(id: '_root', name: 'Root'))).first
-            : _folders.first);
-
-    final uid = FirebaseAuth.instance.currentUser!.uid;
-    final pathPrefix = 'users/$uid/folders/${target.id}';
-
-    // optimistic placeholders
-    final plats =
-        dropped
-            .map(
-              (p) => FileMeta(
-                name: p.name,
-                size: p.size,
-                url: 'uploading…',
-                type: p.extension ?? '',
-                uploadedAt: DateTime.now(),
-              ),
-            )
-            .toList();
+    // optimistic UI
+    final stubs = dropped.map(
+      (p) => FileMeta(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        name: p.name,
+        size: p.size,
+        url: 'uploading…',
+        type: p.extension ?? '',
+        uploadedAt: DateTime.now(),
+        folderId: folderId,
+      ),
+    );
 
     setState(() {
-      _filesByFolder.putIfAbsent(target!.id, () => []).addAll(plats);
-      _selected = target;
+      if (folderId == null) {
+        _topLevelFiles.addAll(stubs);
+      } else {
+        _filesByFolder.putIfAbsent(folderId, () => []).addAll(stubs);
+      }
     });
 
-    // upload each
-    for (final file in dropped) {
+    // real upload
+    for (final p in dropped) {
       try {
-        final ref = FirebaseStorage.instance.ref('$pathPrefix/${file.name}');
-        UploadTask task;
-        if (file.bytes != null) {
-          task = ref.putData(file.bytes!);
-        } else {
-          task = ref.putFile(File(file.path!));
-        }
-
-        final snap = await task;
-        final url = await snap.ref.getDownloadURL();
-
-        final meta = FileMeta(
-          name: file.name,
-          size: file.size,
-          url: url,
-          type: file.extension ?? '',
-          uploadedAt: DateTime.now(),
-        );
-
-        // replace placeholder
-        setState(() {
-          final list = _filesByFolder[target!.id]!;
-          final idx = list.indexWhere((m) => m.name == file.name);
-          if (idx != -1) list[idx] = meta;
-        });
-
-        await FirebaseFirestore.instance
-            .doc('users/$uid/folders/${target.id}')
-            .collection('files')
-            .add({
-              'name': meta.name,
-              'size': meta.size,
-              'type': meta.type,
-              'url': meta.url,
-              'uploadedAt': FieldValue.serverTimestamp(),
-            });
+        final meta = await _uploadOne(pFile: p, folderId: folderId);
+        _replaceStub(meta);
       } catch (e) {
-        _showSnack('Failed to upload ${file.name}: $e', isErr: true);
+        _snack('Failed to upload ${p.name}: $e', err: true);
       }
     }
   }
 
-  // ──────────────────────────────────────────────────  Helpers
-  Future<void> _openFile(String url) async {
+  Future<FileMeta> _uploadOne({
+    required PlatformFile pFile,
+    required String? folderId,
+  }) async {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    final ref = FirebaseStorage.instance.ref(
+      folderId == null
+          ? 'users/$uid/files/${pFile.name}'
+          : 'users/$uid/folders/$folderId/${pFile.name}',
+    );
+
+    final snap =
+        await (pFile.bytes != null
+            ? ref.putData(pFile.bytes!)
+            : ref.putFile(File(pFile.path!)));
+    final url = await snap.ref.getDownloadURL();
+
+    final doc =
+        folderId == null
+            ? FirebaseFirestore.instance.collection('users/$uid/files').doc()
+            : FirebaseFirestore.instance
+                .collection('users/$uid/folders/$folderId/files')
+                .doc();
+
+    await _safeSet(doc, {
+      'name': pFile.name,
+      'size': pFile.size,
+      'type': pFile.extension,
+      'url': url,
+      'uploadedAt': FieldValue.serverTimestamp(),
+      'folderId': folderId,
+    });
+
+    return FileMeta(
+      id: doc.id,
+      name: pFile.name,
+      size: pFile.size,
+      url: url,
+      type: pFile.extension ?? '',
+      uploadedAt: DateTime.now(),
+      folderId: folderId,
+    );
+  }
+
+  void _replaceStub(FileMeta real) {
+    setState(() {
+      final list =
+          real.folderId == null
+              ? _topLevelFiles
+              : _filesByFolder[real.folderId]!;
+      final idx = list.indexWhere((m) => m.name == real.name);
+      if (idx != -1) list[idx] = real;
+    });
+  }
+
+  /* ── misc helpers ─────────────────────────────────────────── */
+  Future<void> _openUrl(String url) async {
     final uri = Uri.parse(url);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else {
-      _showSnack('Cannot open file', isErr: true);
+      _snack('Cannot open file', err: true);
     }
   }
 
-  void _showSnack(String msg, {bool isErr = false}) {
+  void _snack(String msg, {bool err = false}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: isErr ? Colors.red : null),
+      SnackBar(content: Text(msg), backgroundColor: err ? Colors.red : null),
     );
+  }
+
+  Future<void> _safeSet(
+    DocumentReference ref,
+    Map<String, dynamic> data,
+  ) async {
+    try {
+      await ref.set(data);
+      debugPrint('✅ wrote to ${ref.path}');
+    } catch (e, st) {
+      debugPrint('❌ Firestore write failed: $e\n$st');
+      rethrow; // still bubble up to UI snackbar
+    }
   }
 }
