@@ -87,4 +87,5 @@ class DefaultFirebaseOptions {
     storageBucket: 'filegenius-app1.firebasestorage.app',
     measurementId: 'G-XJCDTHNNEZ',
   );
+
 }

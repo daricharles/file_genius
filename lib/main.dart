@@ -4,7 +4,6 @@
 // -----------------------------------------------------
 
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -22,8 +21,18 @@ import 'constants.dart';
 import 'login_page.dart';
 import 'side_bar.dart';
 import 'main_pane.dart';
-import 'file_viewer.dart';
 import 'models.dart';
+
+/// Safely writes data to Firestore and logs the result.
+Future<void> _safeSet(DocumentReference ref, Map<String, dynamic> data) async {
+  try {
+    await ref.set(data);
+    debugPrint('✅ wrote to [32m[1m[4m${ref.path}[0m');
+  } catch (e, st) {
+    debugPrint('❌ Firestore write failed: $e\n$st');
+    rethrow;
+  }
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,7 +40,7 @@ Future<void> main() async {
   runApp(const FileGeniusApp());
 }
 
-/*──────────────────────────  Auth‑gate  ──────────────────────────*/
+/// The root widget that gates access based on authentication state.
 class FileGeniusApp extends StatelessWidget {
   const FileGeniusApp({super.key});
 
@@ -56,7 +65,7 @@ class FileGeniusApp extends StatelessWidget {
   }
 }
 
-/*──────────────────────────  Home  ───────────────────────────────*/
+/// The main home screen after authentication.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -72,18 +81,21 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Folder? _selectedFolder; // highlighted in tree
   FileMeta? _previewFile; // shown in right‑hand viewer
-  late final List<StreamSubscription> _folderSubs;
+  List<StreamSubscription> _folderSubs = [];
+  StreamSubscription? _foldersSubscription;
+  StreamSubscription? _topLevelFilesSubscription;
 
   /* ── life‑cycle ───────────────────────────────────────────── */
   @override
   void initState() {
     super.initState();
-    _folderSubs = [];
     _attachFirestoreStreams();
   }
 
   @override
   void dispose() {
+    _foldersSubscription?.cancel();
+    _topLevelFilesSubscription?.cancel();
     for (final s in _folderSubs) {
       s.cancel();
     }
@@ -95,31 +107,51 @@ class _HomeScreenState extends State<HomeScreen> {
     final uid = FirebaseAuth.instance.currentUser!.uid;
 
     // folders
-    FirebaseFirestore.instance
+    _foldersSubscription = FirebaseFirestore.instance
         .collection('users/$uid/folders')
         .orderBy('createdAt')
         .snapshots()
-        .listen((q) {
-          setState(() {
-            _folders
-              ..clear()
-              ..addAll(q.docs.map(Folder.fromDoc));
-          });
-          _rebindFolderFileStreams();
-        });
+        .listen(
+          (q) {
+            if (mounted) {
+              setState(() {
+                _folders
+                  ..clear()
+                  ..addAll(q.docs.map(Folder.fromDoc));
+              });
+              _rebindFolderFileStreams();
+            }
+          },
+          onError: (error) {
+            debugPrint('❌ Firestore folders listener error: $error');
+            if (mounted) {
+              _snack('Failed to load folders: $error', err: true);
+            }
+          },
+        );
 
     // top‑level files
-    FirebaseFirestore.instance
+    _topLevelFilesSubscription = FirebaseFirestore.instance
         .collection('users/$uid/files')
         .orderBy('uploadedAt')
         .snapshots()
-        .listen((q) {
-          setState(() {
-            _topLevelFiles
-              ..clear()
-              ..addAll(q.docs.map(FileMeta.fromDoc));
-          });
-        });
+        .listen(
+          (q) {
+            if (mounted) {
+              setState(() {
+                _topLevelFiles
+                  ..clear()
+                  ..addAll(q.docs.map(FileMeta.fromDoc));
+              });
+            }
+          },
+          onError: (error) {
+            debugPrint('❌ Firestore files listener error: $error');
+            if (mounted) {
+              _snack('Failed to load files: $error', err: true);
+            }
+          },
+        );
   }
 
   void _rebindFolderFileStreams() {
@@ -133,13 +165,15 @@ class _HomeScreenState extends State<HomeScreen> {
               .collection('users/$uid/folders/${f.id}/files')
               .orderBy('uploadedAt')
               .snapshots()
-              .listen(
-                (q) => setState(
-                  () =>
-                      _filesByFolder[f.id] =
-                          q.docs.map(FileMeta.fromDoc).toList(),
-                ),
-              );
+              .listen((q) {
+                if (mounted) {
+                  setState(
+                    () =>
+                        _filesByFolder[f.id] =
+                            q.docs.map(FileMeta.fromDoc).toList(),
+                  );
+                }
+              });
         }).toList();
   }
 
@@ -178,41 +212,99 @@ class _HomeScreenState extends State<HomeScreen> {
             (id) => setState(() {
               _selectedFolder =
                   id == null ? null : _folders.firstWhere((f) => f.id == id);
-              _clearPreview();
+              _previewFile = null;
             }),
-        // click on a top‑level file → preview it
-        onSelectTopFile: (f) => setState(() => _previewFile = f),
-
+        onSelectAnyFile: (file) => setState(() => _previewFile = file),
         onSignOut: () async => FirebaseAuth.instance.signOut(),
         onUpgradePlan: () => _snack('Upgrade plan (todo)'),
       );
 
-      /* Main list pane (left side of the content area) */
-      final listPane = MainPane(
-        selectedFolder: _selectedFolder,
-        files: _visibleFiles,
-        onPickFiles: _pickFiles,
-        onDropFiles: (fs) => _handleDroppedFiles(fs, _selectedFolder),
-        onOpenUrl: _openUrl,
-      );
-
-      /* Optional right‑hand preview */
+      /* Main content area */
       Widget content;
-      if (_previewFile == null) {
-        content = listPane;
+      if (_previewFile != null) {
+        content = MainPane(
+          selectedFolder: _selectedFolder,
+          files: _visibleFiles,
+          onPickFiles: _pickFiles,
+          onDropFiles: (fs) => _handleDroppedFiles(fs, _selectedFolder),
+          onOpenUrl: _openUrl,
+          previewFile: _previewFile,
+          onSelectFile: (file) => setState(() => _previewFile = file),
+          onDeleteFile: (file) async {
+            final confirmed = await showDialog<bool>(
+              context: context,
+              builder:
+                  (ctx) => AlertDialog(
+                    title: const Text('Delete File'),
+                    content: Text(
+                      'Are you sure you want to delete "${file.name}"? This action cannot be undone.',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(ctx).pop(false),
+                        child: const Text('Cancel'),
+                      ),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                        ),
+                        onPressed: () => Navigator.of(ctx).pop(true),
+                        child: const Text('Delete'),
+                      ),
+                    ],
+                  ),
+            );
+            if (confirmed != true) return;
+            final uid = FirebaseAuth.instance.currentUser!.uid;
+            String storagePath;
+            DocumentReference docRef;
+            if (file.folderId == null) {
+              // Top-level file
+              storagePath = 'users/$uid/files/${file.name}';
+              docRef = FirebaseFirestore.instance.doc(
+                'users/$uid/files/${file.id}',
+              );
+            } else {
+              // File in folder
+              storagePath = 'users/$uid/folders/${file.folderId}/${file.name}';
+              docRef = FirebaseFirestore.instance.doc(
+                'users/$uid/folders/${file.folderId}/files/${file.id}',
+              );
+            }
+            try {
+              await FirebaseStorage.instance.ref(storagePath).delete();
+              await docRef.delete();
+              if (mounted) {
+                setState(() => _previewFile = null);
+                _snack('File deleted');
+              }
+            } catch (e) {
+              _snack('Failed to delete file: $e', err: true);
+            }
+          },
+        );
+      } else if (_selectedFolder != null) {
+        content = MainPane(
+          selectedFolder: _selectedFolder,
+          files: _visibleFiles,
+          onPickFiles: _pickFiles,
+          onDropFiles: (fs) => _handleDroppedFiles(fs, _selectedFolder),
+          onOpenUrl: _openUrl,
+          previewFile: null,
+          onSelectFile: (file) => setState(() => _previewFile = file),
+          onDeleteFile: null,
+        );
       } else {
-        // split the space: 50  % list / 50  % viewer
-        content = Row(
-          children: [
-            Expanded(child: listPane),
-            const VerticalDivider(width: 1),
-            Expanded(
-              child: FileViewer(
-                url: _previewFile!.url,
-                type: _previewFile!.type.toLowerCase(),
-              ),
-            ),
-          ],
+        // Show welcome/upload screen (no folder or file selected)
+        content = MainPane(
+          selectedFolder: null,
+          files: const [],
+          onPickFiles: _pickFiles,
+          onDropFiles: (fs) => _handleDroppedFiles(fs, null),
+          onOpenUrl: _openUrl,
+          previewFile: null,
+          onSelectFile: (file) => setState(() => _previewFile = file),
+          onDeleteFile: null,
         );
       }
 
@@ -259,13 +351,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     id: DateTime.now().millisecondsSinceEpoch.toString(),
                     name: name,
                   );
-                  setState(() {
-                    _folders.add(f);
-                    _selectedFolder = f;
-                    _clearPreview();
-                  });
-                  Navigator.pop(context);
-
                   final uid = FirebaseAuth.instance.currentUser!.uid;
                   await _safeSet(
                     FirebaseFirestore.instance.doc(
@@ -273,6 +358,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     {'name': f.name, 'createdAt': FieldValue.serverTimestamp()},
                   );
+                  if (mounted) {
+                    setState(() {
+                      _folders.add(f);
+                      _selectedFolder = f;
+                      _clearPreview();
+                    });
+                  }
+                  // ignore: use_build_context_synchronously
+                  Navigator.pop(context);
                 },
                 child: const Text('Create'),
               ),
@@ -312,13 +406,15 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
 
-    setState(() {
-      if (folderId == null) {
-        _topLevelFiles.addAll(stubs);
-      } else {
-        _filesByFolder.putIfAbsent(folderId, () => []).addAll(stubs);
-      }
-    });
+    if (mounted) {
+      setState(() {
+        if (folderId == null) {
+          _topLevelFiles.addAll(stubs);
+        } else {
+          _filesByFolder.putIfAbsent(folderId, () => []).addAll(stubs);
+        }
+      });
+    }
 
     // real upload
     for (final p in dropped) {
@@ -342,11 +438,8 @@ class _HomeScreenState extends State<HomeScreen> {
           : 'users/$uid/folders/$folderId/${pFile.name}',
     );
 
-    final snap =
-        await (pFile.bytes != null
-            ? ref.putData(pFile.bytes!)
-            : ref.putFile(File(pFile.path!)));
-    final url = await snap.ref.getDownloadURL();
+    final uploadTask = await ref.putData(pFile.bytes!);
+    final downloadUrl = await uploadTask.ref.getDownloadURL();
 
     final doc =
         folderId == null
@@ -359,7 +452,7 @@ class _HomeScreenState extends State<HomeScreen> {
       'name': pFile.name,
       'size': pFile.size,
       'type': pFile.extension,
-      'url': url,
+      'url': downloadUrl,
       'uploadedAt': FieldValue.serverTimestamp(),
       'folderId': folderId,
     });
@@ -368,7 +461,7 @@ class _HomeScreenState extends State<HomeScreen> {
       id: doc.id,
       name: pFile.name,
       size: pFile.size,
-      url: url,
+      url: downloadUrl,
       type: pFile.extension ?? '',
       uploadedAt: DateTime.now(),
       folderId: folderId,
@@ -376,14 +469,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _replaceStub(FileMeta real) {
-    setState(() {
-      final list =
-          real.folderId == null
-              ? _topLevelFiles
-              : _filesByFolder[real.folderId]!;
-      final idx = list.indexWhere((m) => m.name == real.name);
-      if (idx != -1) list[idx] = real;
-    });
+    if (mounted) {
+      setState(() {
+        final list =
+            real.folderId == null
+                ? _topLevelFiles
+                : _filesByFolder[real.folderId]!;
+        final idx = list.indexWhere((m) => m.name == real.name);
+        if (idx != -1) list[idx] = real;
+      });
+    }
   }
 
   /* ── misc helpers ─────────────────────────────────────────── */
@@ -401,18 +496,5 @@ class _HomeScreenState extends State<HomeScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: err ? Colors.red : null),
     );
-  }
-
-  Future<void> _safeSet(
-    DocumentReference ref,
-    Map<String, dynamic> data,
-  ) async {
-    try {
-      await ref.set(data);
-      debugPrint('✅ wrote to ${ref.path}');
-    } catch (e, st) {
-      debugPrint('❌ Firestore write failed: $e\n$st');
-      rethrow; // still bubble up to UI snackbar
-    }
   }
 }

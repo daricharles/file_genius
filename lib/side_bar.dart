@@ -21,8 +21,8 @@ class FileGeniusSidebar extends StatelessWidget {
     required this.onUploadFile,
     required this.onToggleFolder,
     required this.onSelectFolder, // nullable id (= select a folder)
-    required this.onSelectTopFile, // top‑level file click
-    this.onSelectAnyFile, // 🔸 NEW – fires for *any* file
+    this.onSelectTopFile, // top‑level file click (now optional)
+    this.onSelectAnyFile, // fires for *any* file
     required this.onSignOut,
     required this.onUpgradePlan,
   });
@@ -40,7 +40,7 @@ class FileGeniusSidebar extends StatelessWidget {
   final VoidCallback onUploadFile;
   final void Function(String folderId) onToggleFolder;
   final void Function(String? folderId) onSelectFolder;
-  final void Function(FileMeta file) onSelectTopFile;
+  final void Function(FileMeta file)? onSelectTopFile;
   final void Function(FileMeta file)? onSelectAnyFile; // 🔸 optional
   final VoidCallback onSignOut;
   final VoidCallback onUpgradePlan;
@@ -141,7 +141,6 @@ class FileGeniusSidebar extends StatelessWidget {
                             style: const TextStyle(fontSize: 13),
                           ),
                           onTap: () {
-                            // Notify parent about the specific file
                             onSelectAnyFile?.call(f);
                           },
                         ),
@@ -159,10 +158,10 @@ class FileGeniusSidebar extends StatelessWidget {
     leading: const Icon(Icons.insert_drive_file_outlined, size: 18),
     title: Text(f.name, style: const TextStyle(fontSize: 13)),
     onTap: () {
-      // legacy callback
-      onSelectTopFile(f);
       // new unified callback
       onSelectAnyFile?.call(f);
+      // legacy callback (optional)
+      onSelectTopFile?.call(f);
     },
   );
 }
