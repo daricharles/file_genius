@@ -84,6 +84,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<StreamSubscription> _folderSubs = [];
   StreamSubscription? _foldersSubscription;
   StreamSubscription? _topLevelFilesSubscription;
+  bool _sidebarCollapsed = false;
 
   /* ── life‑cycle ───────────────────────────────────────────── */
   @override
@@ -198,7 +199,6 @@ class _HomeScreenState extends State<HomeScreen> {
         filesByFolder: _filesByFolder,
         selectedFolderId: _selectedFolder?.id,
         collapsed: _collapsed,
-
         onDashboardTap: () => _snack('Dashboard (todo)'),
         onCreateFolder: _createFolderDialog,
         onUploadFile: _pickFiles,
@@ -217,6 +217,10 @@ class _HomeScreenState extends State<HomeScreen> {
         onSelectAnyFile: (file) => setState(() => _previewFile = file),
         onSignOut: () async => FirebaseAuth.instance.signOut(),
         onUpgradePlan: () => _snack('Upgrade plan (todo)'),
+        sidebarCollapsed: _sidebarCollapsed,
+        onToggleSidebar:
+            () => setState(() => _sidebarCollapsed = !_sidebarCollapsed),
+        selectedFileId: _previewFile?.id,
       );
 
       /* Main content area */

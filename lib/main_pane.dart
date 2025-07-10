@@ -110,26 +110,8 @@ class MainPane extends StatelessWidget {
             ),
           ),
           const VerticalDivider(width: 1),
-          // Right pane: AI chat placeholder
-          Expanded(
-            flex: 1,
-            child: Column(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  alignment: Alignment.centerLeft,
-                  child: const Text(
-                    'AI Chat',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                const Divider(height: 1),
-                const Expanded(
-                  child: Center(child: Text('Chat UI goes here …')),
-                ),
-              ],
-            ),
-          ),
+          // Right pane: AI chat
+          Expanded(flex: 1, child: ChatPane()),
         ],
       );
     }
@@ -156,37 +138,53 @@ class MainPane extends StatelessWidget {
     }
 
     // ─── Folder selected: file list ───
-    if (files.isEmpty) {
-      // Show a dedicated upload zone for that folder
-      return Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: DragDropZone(
-          label: 'Drop files here to upload to "${selectedFolder!.name}"',
-          onFilesPicked: onPickFiles,
-          onFilesDropped: onDropFiles,
+    return Row(
+      children: [
+        Expanded(
+          flex: 1,
+          child:
+              files.isEmpty
+                  ? Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: DragDropZone(
+                      label:
+                          'Drop files here to upload to "${selectedFolder!.name}"',
+                      onFilesPicked: onPickFiles,
+                      onFilesDropped: onDropFiles,
+                    ),
+                  )
+                  : ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: files.length,
+                    itemBuilder: (context, index) {
+                      final file = files[index];
+                      return ListTile(
+                        leading: const Icon(Icons.picture_as_pdf),
+                        title: Text(file.name),
+                        subtitle: Text(
+                          '${(file.size / 1024).toStringAsFixed(1)} KB • ${file.type}',
+                        ),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.open_in_new),
+                          onPressed: () => onOpenUrl(file.url),
+                        ),
+                        onTap: () => onSelectFile?.call(file),
+                      );
+                    },
+                  ),
         ),
-      );
-    }
-
-    // Show simple list of files for now (tap opens URL)
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: files.length,
-      itemBuilder: (context, index) {
-        final file = files[index];
-        return ListTile(
-          leading: const Icon(Icons.picture_as_pdf),
-          title: Text(file.name),
-          subtitle: Text(
-            '${(file.size / 1024).toStringAsFixed(1)} KB • ${file.type}',
+        const VerticalDivider(width: 1),
+        // Right pane: Placeholder
+        Expanded(
+          flex: 1,
+          child: Center(
+            child: Text(
+              'Select a file to start chatting.',
+              style: TextStyle(color: Colors.grey[600], fontSize: 16),
+            ),
           ),
-          trailing: IconButton(
-            icon: const Icon(Icons.open_in_new),
-            onPressed: () => onOpenUrl(file.url),
-          ),
-          onTap: () => onSelectFile?.call(file),
-        );
-      },
+        ),
+      ],
     );
   }
 }
@@ -245,6 +243,21 @@ class _ChatPaneState extends State<ChatPane> {
   Widget build(BuildContext context) {
     return Column(
       children: [
+        // Title bar
+        Container(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: const [
+              Expanded(
+                child: Text(
+                  'AI Chat',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
         Expanded(
           child: ListView.builder(
             controller: _scrollController,
@@ -310,6 +323,19 @@ class _ChatPaneState extends State<ChatPane> {
                 ),
               ),
               const SizedBox(width: 8),
+              // Microphone icon for speech-to-text (future)
+              IconButton(
+                icon: const Icon(Icons.mic),
+                tooltip: 'Speak (coming soon)',
+                onPressed: () {
+                  // Placeholder for future speech-to-text
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Speech-to-text coming soon!'),
+                    ),
+                  );
+                },
+              ),
               IconButton(icon: const Icon(Icons.send), onPressed: _sendMessage),
             ],
           ),
