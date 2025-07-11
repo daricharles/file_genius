@@ -99,6 +99,9 @@ class MainPane extends StatelessWidget {
                 // File viewer
                 Expanded(
                   child: FileViewer(
+                    key: ValueKey(
+                      previewFile!.id,
+                    ), // or previewFile!.url if id is not unique
                     fileUrl: previewFile!.url,
                     fileType: previewFile!.type.toLowerCase(),
                     onPdfPageChanged:

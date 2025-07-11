@@ -7,13 +7,17 @@
 //
 //   FileViewer(url: someUrl, type: 'pdf' | 'pptx' | 'docx')
 
-import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:pdfx/pdfx.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
+// ignore: deprecated_member_use, avoid_web_libraries_in_flutter
+import 'dart:html' as html; // for web iframe
+// Conditional import for platformViewRegistry
+import 'web_platform_view_registry_stub.dart'
+    if (dart.library.html) 'web_platform_view_registry.dart'
+    as web_registry;
 
 class FileViewer extends StatefulWidget {
   const FileViewer({
@@ -36,11 +40,51 @@ class _FileViewerState extends State<FileViewer> {
   bool _busy = false;
   String? _err;
   int _totalPages = 1;
+  String? _iframeViewType;
 
   @override
   void initState() {
     super.initState();
     if (widget.fileType == 'pdf') _loadPdf();
+    if (kIsWeb &&
+        (widget.fileType == 'pptx' ||
+            widget.fileType == 'docx' ||
+            widget.fileType == 'xlsx')) {
+      _registerIframe();
+    }
+  }
+
+  void _registerIframe() {
+    final viewType = 'iframe-${widget.fileUrl.hashCode}';
+    final viewerUrl =
+        'https://docs.google.com/gview?url=${Uri.encodeComponent(widget.fileUrl)}&embedded=true';
+    if (kIsWeb) {
+      web_registry.platformViewRegistry.registerViewFactory(
+        viewType,
+        (int viewId) =>
+            html.IFrameElement()
+              ..src = viewerUrl
+              ..style.border = 'none'
+              ..width = '100%'
+              ..height = '100%',
+      );
+    }
+    _iframeViewType = viewType;
+  }
+
+  @override
+  void didUpdateWidget(covariant FileViewer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.fileUrl != oldWidget.fileUrl &&
+        kIsWeb &&
+        (widget.fileType == 'pptx' ||
+            widget.fileType == 'docx' ||
+            widget.fileType == 'xlsx')) {
+      _registerIframe();
+    }
+    if (widget.fileType == 'pdf' && widget.fileUrl != oldWidget.fileUrl) {
+      _loadPdf();
+    }
   }
 
   Future<void> _loadPdf() async {
@@ -80,56 +124,27 @@ class _FileViewerState extends State<FileViewer> {
             widget.onPdfPageChanged?.call(page, _totalPages);
           },
         );
-
       case 'pptx':
       case 'docx':
       case 'xlsx':
         final viewerUrl =
             'https://docs.google.com/gview?url=${Uri.encodeComponent(widget.fileUrl)}&embedded=true';
-        return Center(
-          child: ElevatedButton(
-            onPressed: () async {
-              if (await canLaunchUrl(Uri.parse(viewerUrl))) {
-                await launchUrl(Uri.parse(viewerUrl));
-              }
-            },
-            child: Text('Open Document'),
-          ),
-        );
-
+        if (kIsWeb) {
+          // Embed iframe for web
+          return _iframeViewType == null
+              ? const Center(child: CircularProgressIndicator())
+              : HtmlElementView(viewType: _iframeViewType!);
+        } else {
+          // Use WebView for mobile/desktop
+          return WebViewWidget(
+            controller:
+                WebViewController()
+                  ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                  ..loadRequest(Uri.parse(viewerUrl)),
+          );
+        }
       default:
         return Center(child: Text('Unsupported file type: ${widget.fileType}'));
     }
-  }
-}
-
-/* ---------------- Web‑view wrapper for pptx / docx ---------------- */
-
-// ignore: unused_element
-class _DocsWebView extends StatelessWidget {
-  const _DocsWebView(this.fileUrl);
-  final String fileUrl;
-
-  String get _viewer =>
-      'https://docs.google.com/gview?embedded=1&url=${Uri.encodeComponent(fileUrl)}';
-
-  @override
-  Widget build(BuildContext context) {
-    // Mobile / desktop: in‑app WebView
-    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-      return WebViewWidget(
-        controller:
-            WebViewController()
-              ..setJavaScriptMode(JavaScriptMode.unrestricted)
-              ..loadRequest(Uri.parse(_viewer)),
-      );
-    }
-    // Web: same widget works (webview_flutter_web)
-    return WebViewWidget(
-      controller:
-          WebViewController()
-            ..setJavaScriptMode(JavaScriptMode.unrestricted)
-            ..loadRequest(Uri.parse(_viewer)),
-    );
   }
 }
