@@ -105,8 +105,12 @@ class MainPane extends StatelessWidget {
                     fileUrl: previewFile!.url,
                     fileType: previewFile!.type.toLowerCase(),
                     onPdfPageChanged:
-                        (current, total) =>
-                            pdfPageNotifier.value = [current, total],
+                        (current, total) {
+                          // Use Future.microtask to avoid setState during build
+                          Future.microtask(() {
+                            pdfPageNotifier.value = [current, total];
+                          });
+                        },
                   ),
                 ),
               ],

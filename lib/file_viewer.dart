@@ -1,20 +1,17 @@
 // lib/file_viewer.dart
 //
 // Tiny viewer that supports three types by URL:
-//   • PDF   – rendered with pdfx
-//   • PPTX  – rendered via Google‑Docs viewer in WebView
+//   • PDF   – rendered with Syncfusion PDF Viewer (text selection supported)
+//   • PPTX  – rendered via Google Docs in an iframe
 //   • DOCX  – idem
-//
-//   FileViewer(url: someUrl, type: 'pdf' | 'pptx' | 'docx')
+//   • XLSX  – idem
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:pdfx/pdfx.dart';
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-// ignore: deprecated_member_use, avoid_web_libraries_in_flutter
-import 'dart:html' as html; // for web iframe
-// Conditional import for platformViewRegistry
+
+// Conditional imports for web
 import 'web_platform_view_registry_stub.dart'
     if (dart.library.html) 'web_platform_view_registry.dart'
     as web_registry;
@@ -23,7 +20,7 @@ class FileViewer extends StatefulWidget {
   const FileViewer({
     super.key,
     required this.fileUrl,
-    required this.fileType, // lower-case extension
+    required this.fileType,
     this.onPdfPageChanged,
   });
 
@@ -36,106 +33,120 @@ class FileViewer extends StatefulWidget {
 }
 
 class _FileViewerState extends State<FileViewer> {
-  PdfControllerPinch? _pdf;
-  bool _busy = false;
-  String? _err;
-  int _totalPages = 1;
   String? _iframeViewType;
+  bool _iframeFailed = false;
+  int? _pdfPageCount;
 
   @override
   void initState() {
     super.initState();
-    if (widget.fileType == 'pdf') _loadPdf();
-    if (kIsWeb &&
-        (widget.fileType == 'pptx' ||
-            widget.fileType == 'docx' ||
-            widget.fileType == 'xlsx')) {
-      _registerIframe();
-    }
-  }
-
-  void _registerIframe() {
-    final viewType = 'iframe-${widget.fileUrl.hashCode}';
-    final viewerUrl =
-        'https://docs.google.com/gview?url=${Uri.encodeComponent(widget.fileUrl)}&embedded=true';
-    if (kIsWeb) {
-      web_registry.platformViewRegistry.registerViewFactory(
-        viewType,
-        (int viewId) =>
-            html.IFrameElement()
-              ..src = viewerUrl
-              ..style.border = 'none'
-              ..width = '100%'
-              ..height = '100%',
-      );
-    }
-    _iframeViewType = viewType;
+    if (kIsWeb && _isOfficeFile) _setupIframe();
   }
 
   @override
   void didUpdateWidget(covariant FileViewer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.fileUrl != oldWidget.fileUrl &&
-        kIsWeb &&
-        (widget.fileType == 'pptx' ||
-            widget.fileType == 'docx' ||
-            widget.fileType == 'xlsx')) {
-      _registerIframe();
-    }
-    if (widget.fileType == 'pdf' && widget.fileUrl != oldWidget.fileUrl) {
-      _loadPdf();
+    if (widget.fileUrl != oldWidget.fileUrl) {
+      if (kIsWeb && _isOfficeFile) _setupIframe();
     }
   }
 
-  Future<void> _loadPdf() async {
-    setState(() => _busy = true);
+  bool get _isOfficeFile =>
+      widget.fileType == 'pptx' ||
+      widget.fileType == 'docx' ||
+      widget.fileType == 'xlsx';
+
+  void _setupIframe() {
+    final viewType = 'iframe-${widget.fileUrl.hashCode}';
+    final viewerUrl =
+        'https://docs.google.com/gview?url=${Uri.encodeComponent(widget.fileUrl)}&embedded=true';
     try {
-      final res = await http.get(Uri.parse(widget.fileUrl));
-      if (res.statusCode != 200) throw 'HTTP  ${res.statusCode}';
-      final doc = await PdfDocument.openData(res.bodyBytes);
-      _totalPages = doc.pagesCount;
-      _pdf = PdfControllerPinch(document: Future.value(doc));
-      // Notify initial page
-      widget.onPdfPageChanged?.call(1, _totalPages);
+      web_registry.registerIframe(viewType, viewerUrl);
+      setState(() {
+        _iframeViewType = viewType;
+        _iframeFailed = false;
+      });
     } catch (e) {
-      _err = 'Failed to load PDF ($e)';
+      setState(() {
+        _iframeViewType = null;
+        _iframeFailed = true;
+      });
     }
-    if (mounted) setState(() => _busy = false);
-  }
-
-  @override
-  void dispose() {
-    _pdf?.dispose();
-    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     if (widget.fileUrl.isEmpty) {
-      return Center(child: Text('No file selected or URL is empty.'));
+      return const Center(child: Text('No file selected.'));
     }
+
     switch (widget.fileType) {
       case 'pdf':
-        if (_busy) return const Center(child: CircularProgressIndicator());
-        if (_err != null) return Center(child: Text(_err!));
-        return PdfViewPinch(
-          controller: _pdf!,
-          onPageChanged: (page) {
-            widget.onPdfPageChanged?.call(page, _totalPages);
+        // Use Syncfusion PDF Viewer for text selection/highlighting
+        return SfPdfViewer.network(
+          widget.fileUrl,
+          onDocumentLoaded: (details) {
+            _pdfPageCount = details.document.pages.count;
+            // Use Future.microtask to avoid setState during build
+            Future.microtask(() {
+              if (mounted) {
+                widget.onPdfPageChanged?.call(1, _pdfPageCount!);
+              }
+            });
+          },
+          onPageChanged: (details) {
+            // Use Future.microtask to avoid setState during build
+            Future.microtask(() {
+              if (mounted) {
+                widget.onPdfPageChanged?.call(
+                  details.newPageNumber,
+                  _pdfPageCount ?? 0,
+                );
+              }
+            });
           },
         );
+
       case 'pptx':
       case 'docx':
       case 'xlsx':
-        final viewerUrl =
-            'https://docs.google.com/gview?url=${Uri.encodeComponent(widget.fileUrl)}&embedded=true';
         if (kIsWeb) {
-          // Embed iframe for web
-          return _iframeViewType == null
-              ? const Center(child: CircularProgressIndicator())
-              : HtmlElementView(viewType: _iframeViewType!);
+          if (_iframeFailed) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.error_outline, size: 48, color: Colors.red),
+                    SizedBox(height: 16),
+                    Text(
+                      'Preview is not supported in this browser or Flutter version.',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    SizedBox(height: 12),
+                    Text(
+                      'Please convert your file to PDF to preview it.',
+                      style: TextStyle(fontSize: 16, color: Colors.grey[700]),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+          if (_iframeViewType == null) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          // Use HtmlElementView with the registered iframe
+          return HtmlElementView(viewType: _iframeViewType!);
         } else {
-          // Use WebView for mobile/desktop
+          final viewerUrl =
+              'https://docs.google.com/gview?url=${Uri.encodeComponent(widget.fileUrl)}&embedded=true';
           return WebViewWidget(
             controller:
                 WebViewController()
@@ -143,6 +154,7 @@ class _FileViewerState extends State<FileViewer> {
                   ..loadRequest(Uri.parse(viewerUrl)),
           );
         }
+
       default:
         return Center(child: Text('Unsupported file type: ${widget.fileType}'));
     }
