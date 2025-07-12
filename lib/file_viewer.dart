@@ -1,20 +1,10 @@
-// lib/file_viewer.dart
-//
-// Tiny viewer that supports three types by URL:
-//   • PDF   – rendered with Syncfusion PDF Viewer (text selection supported)
-//   • PPTX  – rendered via Google Docs in an iframe
-//   • DOCX  – idem
-//   • XLSX  – idem
-
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-// Conditional imports for web
-import 'web_platform_view_registry_stub.dart'
-    if (dart.library.html) 'web_platform_view_registry.dart'
-    as web_registry;
+import 'html_view_factory_stub.dart'
+    if (dart.library.html) 'html_view_factory_web.dart';
 
 class FileViewer extends StatefulWidget {
   const FileViewer({
@@ -33,21 +23,21 @@ class FileViewer extends StatefulWidget {
 }
 
 class _FileViewerState extends State<FileViewer> {
-  String? _iframeViewType;
-  bool _iframeFailed = false;
   int? _pdfPageCount;
+  WebViewController? _webViewController;
+  bool _webViewError = false;
+  String? _viewId;
 
   @override
   void initState() {
     super.initState();
-    if (kIsWeb && _isOfficeFile) _setupIframe();
-  }
 
-  @override
-  void didUpdateWidget(covariant FileViewer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.fileUrl != oldWidget.fileUrl) {
-      if (kIsWeb && _isOfficeFile) _setupIframe();
+    if (_isOfficeFile) {
+      if (kIsWeb) {
+        _registerIframe();
+      } else {
+        _setupWebView();
+      }
     }
   }
 
@@ -56,21 +46,27 @@ class _FileViewerState extends State<FileViewer> {
       widget.fileType == 'docx' ||
       widget.fileType == 'xlsx';
 
-  void _setupIframe() {
-    final viewType = 'iframe-${widget.fileUrl.hashCode}';
+  void _registerIframe() {
     final viewerUrl =
         'https://docs.google.com/gview?url=${Uri.encodeComponent(widget.fileUrl)}&embedded=true';
+    final viewId = 'iframe-${widget.fileUrl.hashCode}';
+
+    registerIframe(viewId, viewerUrl);
+
+    setState(() => _viewId = viewId);
+  }
+
+  void _setupWebView() {
+    final viewerUrl =
+        'https://docs.google.com/gview?url=${Uri.encodeComponent(widget.fileUrl)}&embedded=true';
+
     try {
-      web_registry.registerIframe(viewType, viewerUrl);
-      setState(() {
-        _iframeViewType = viewType;
-        _iframeFailed = false;
-      });
-    } catch (e) {
-      setState(() {
-        _iframeViewType = null;
-        _iframeFailed = true;
-      });
+      _webViewController =
+          WebViewController()
+            ..setJavaScriptMode(JavaScriptMode.unrestricted)
+            ..loadRequest(Uri.parse(viewerUrl));
+    } catch (_) {
+      setState(() => _webViewError = true);
     }
   }
 
@@ -82,12 +78,10 @@ class _FileViewerState extends State<FileViewer> {
 
     switch (widget.fileType) {
       case 'pdf':
-        // Use Syncfusion PDF Viewer for text selection/highlighting
         return SfPdfViewer.network(
           widget.fileUrl,
           onDocumentLoaded: (details) {
             _pdfPageCount = details.document.pages.count;
-            // Use Future.microtask to avoid setState during build
             Future.microtask(() {
               if (mounted) {
                 widget.onPdfPageChanged?.call(1, _pdfPageCount!);
@@ -95,7 +89,6 @@ class _FileViewerState extends State<FileViewer> {
             });
           },
           onPageChanged: (details) {
-            // Use Future.microtask to avoid setState during build
             Future.microtask(() {
               if (mounted) {
                 widget.onPdfPageChanged?.call(
@@ -110,49 +103,20 @@ class _FileViewerState extends State<FileViewer> {
       case 'pptx':
       case 'docx':
       case 'xlsx':
+        if (_webViewError) {
+          return const Center(child: Text('❌ Failed to load preview.'));
+        }
+
         if (kIsWeb) {
-          if (_iframeFailed) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.error_outline, size: 48, color: Colors.red),
-                    SizedBox(height: 16),
-                    Text(
-                      'Preview is not supported in this browser or Flutter version.',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    SizedBox(height: 12),
-                    Text(
-                      'Please convert your file to PDF to preview it.',
-                      style: TextStyle(fontSize: 16, color: Colors.grey[700]),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-          if (_iframeViewType == null) {
+          if (_viewId == null) {
             return const Center(child: CircularProgressIndicator());
           }
-          // Use HtmlElementView with the registered iframe
-          return HtmlElementView(viewType: _iframeViewType!);
+          return HtmlElementView(viewType: _viewId!);
         } else {
-          final viewerUrl =
-              'https://docs.google.com/gview?url=${Uri.encodeComponent(widget.fileUrl)}&embedded=true';
-          return WebViewWidget(
-            controller:
-                WebViewController()
-                  ..setJavaScriptMode(JavaScriptMode.unrestricted)
-                  ..loadRequest(Uri.parse(viewerUrl)),
-          );
+          if (_webViewController == null) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          return WebViewWidget(controller: _webViewController!);
         }
 
       default:

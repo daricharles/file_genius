@@ -6,6 +6,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -15,6 +16,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'firebase_options.dart';
+
+// WebView for web support
+// ignore: depend_on_referenced_packages
+import 'package:webview_flutter_platform_interface/webview_flutter_platform_interface.dart';
+import 'package:webview_flutter_web/webview_flutter_web.dart';
 
 // UI
 import 'constants.dart';
@@ -37,6 +43,12 @@ Future<void> _safeSet(DocumentReference ref, Map<String, dynamic> data) async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Register WebView platform for web
+  if (kIsWeb) {
+    WebViewPlatform.instance = WebWebViewPlatform();
+  }
+
   runApp(const FileGeniusApp());
 }
 
