@@ -30,6 +30,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  dio: ^5.4.0
+  flutter_markdown: ^0.6.18
+  google_generative_ai: ^0.3.2
 
   # ─── Firebase (current stable bundle – all 100 % compatible) ───
   firebase_core:     ^2.30.0
@@ -51,6 +54,8 @@ dependencies:
   url_launcher:      ^6.2.6
   dotted_border:     ^2.1.0
   intl:              ^0.19.0  # Force latest version to avoid deprecation warnings
+  read_pdf_text: ^0.3.1
+  path_provider: ^2.1.2
 
   # Needed by Firebase‑web; fixes the PromiseJsImpl symbol.
   js: ^0.7.2

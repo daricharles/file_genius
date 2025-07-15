@@ -20,6 +20,8 @@ import 'package:file_picker/file_picker.dart';
 import 'models.dart'; // ← contains Folder & FileMeta classes
 import 'drag_drop_zone.dart';
 import 'file_viewer.dart';
+import 'services/file_content_extractor.dart';
+import 'widgets/ai_chat_widget.dart';
 
 class MainPane extends StatelessWidget {
   MainPane({
@@ -50,76 +52,103 @@ class MainPane extends StatelessWidget {
   Widget build(BuildContext context) {
     // If a file is selected for preview, show split view
     if (previewFile != null) {
-      return Row(
-        children: [
-          Expanded(
-            flex: 1,
-            child: Column(
-              children: [
-                // Header with file name, page indicator, and delete icon
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      // File name
-                      Expanded(
-                        child: Text(
-                          previewFile!.name,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      // Page number indicator (for PDFs only)
-                      if (previewFile!.type.toLowerCase() == 'pdf')
-                        ValueListenableBuilder<List<int>>(
-                          valueListenable: pdfPageNotifier,
-                          builder: (context, value, _) {
-                            final current = value[0];
-                            final total = value[1];
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8.0,
+      return FutureBuilder<String>(
+        future: FileContentExtractor.extractContent(
+          fileUrl: previewFile!.url,
+          fileType: previewFile!.type,
+          fileName: previewFile!.name,
+        ),
+        builder: (context, snapshot) {
+          final supported = FileContentExtractor.supportsAIAnalysis(
+            previewFile!.type,
+          );
+          return Row(
+            children: [
+              Expanded(
+                flex: 1,
+                child: Column(
+                  children: [
+                    // Header with file name, page indicator, and delete icon
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          // File name
+                          Expanded(
+                            child: Text(
+                              previewFile!.name,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
                               ),
-                              child: Text('Page $current of $total'),
-                            );
-                          },
-                        ),
-                      // Delete icon
-                      IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        tooltip: 'Delete file',
-                        onPressed: () => onDeleteFile?.call(previewFile!),
+                            ),
+                          ),
+                          // Page number indicator (for PDFs only)
+                          if (previewFile!.type.toLowerCase() == 'pdf')
+                            ValueListenableBuilder<List<int>>(
+                              valueListenable: pdfPageNotifier,
+                              builder: (context, value, _) {
+                                final current = value[0];
+                                final total = value[1];
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8.0,
+                                  ),
+                                  child: Text('Page $current of $total'),
+                                );
+                              },
+                            ),
+                          // Delete icon
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            tooltip: 'Delete file',
+                            onPressed: () => onDeleteFile?.call(previewFile!),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                // File viewer
-                Expanded(
-                  child: FileViewer(
-                    key: ValueKey(
-                      previewFile!.id,
-                    ), // or previewFile!.url if id is not unique
-                    fileUrl: previewFile!.url,
-                    fileType: previewFile!.type.toLowerCase(),
-                    onPdfPageChanged:
-                        (current, total) {
+                    ),
+                    const Divider(height: 1),
+                    // File viewer
+                    Expanded(
+                      child: FileViewer(
+                        key: ValueKey(
+                          previewFile!.id,
+                        ), // or previewFile!.url if id is not unique
+                        fileUrl: previewFile!.url,
+                        fileType: previewFile!.type.toLowerCase(),
+                        onPdfPageChanged: (current, total) {
                           // Use Future.microtask to avoid setState during build
                           Future.microtask(() {
                             pdfPageNotifier.value = [current, total];
                           });
                         },
-                  ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-          const VerticalDivider(width: 1),
-          // Right pane: AI chat
-          Expanded(flex: 1, child: ChatPane()),
-        ],
+              ),
+              const VerticalDivider(width: 1),
+              // Right pane: AI chat
+              Expanded(
+                flex: 1,
+                child:
+                    !supported
+                        ? Center(
+                          child: Text(
+                            'AI chat is not supported for this file type.',
+                          ),
+                        )
+                        : (snapshot.connectionState == ConnectionState.waiting
+                            ? const Center(child: CircularProgressIndicator())
+                            : AIChatWidget(
+                              fileName: previewFile!.name,
+                              fileType: previewFile!.type,
+                              fileContent: snapshot.data ?? '',
+                            )),
+              ),
+            ],
+          );
+        },
       );
     }
 
