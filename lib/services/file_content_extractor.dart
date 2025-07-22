@@ -116,7 +116,7 @@ class FileContentExtractor {
             return 'Office document. Content can be analyzed through the file viewer interface.';
         }
         final response = await http.post(
-          Uri.parse('http://localhost:3000/' + endpoint),
+          Uri.parse('http://localhost:3000/$endpoint'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'url': fileUrl}),
         );

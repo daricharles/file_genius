@@ -46,8 +46,6 @@ class MainPane extends StatelessWidget {
   onSelectFile; // Add file selection callback
   final void Function(FileMeta file)? onDeleteFile;
 
-  final ValueNotifier<List<int>> pdfPageNotifier = ValueNotifier([1, 1]);
-
   @override
   Widget build(BuildContext context) {
     // If a file is selected for preview, show split view
@@ -83,21 +81,6 @@ class MainPane extends StatelessWidget {
                               ),
                             ),
                           ),
-                          // Page number indicator (for PDFs only)
-                          if (previewFile!.type.toLowerCase() == 'pdf')
-                            ValueListenableBuilder<List<int>>(
-                              valueListenable: pdfPageNotifier,
-                              builder: (context, value, _) {
-                                final current = value[0];
-                                final total = value[1];
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8.0,
-                                  ),
-                                  child: Text('Page $current of $total'),
-                                );
-                              },
-                            ),
                           // Delete icon
                           IconButton(
                             icon: const Icon(Icons.delete, color: Colors.red),
@@ -116,12 +99,6 @@ class MainPane extends StatelessWidget {
                         ), // or previewFile!.url if id is not unique
                         fileUrl: previewFile!.url,
                         fileType: previewFile!.type.toLowerCase(),
-                        onPdfPageChanged: (current, total) {
-                          // Use Future.microtask to avoid setState during build
-                          Future.microtask(() {
-                            pdfPageNotifier.value = [current, total];
-                          });
-                        },
                       ),
                     ),
                   ],

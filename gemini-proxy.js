@@ -3,7 +3,6 @@ const axios = require('axios');
 const cors = require('cors');
 const fileUpload = require('express-fileupload');
 const pdfParse = require('pdf-parse');
-const pptxParser = require('pptx-parser');
 const mammoth = require('mammoth');
 const XLSX = require('xlsx');
 const fs = require('fs');
@@ -14,6 +13,8 @@ app.use(express.json());
 app.use(fileUpload());
 
 const GEMINI_API_KEY = 'AIzaSyBAHxBGsAXmkffc1MPpirFF2dh-sVVnc4U';
+const pptx2json = require('pptx2json');
+const officeparser = require('officeparser');
 
 app.post('/gemini', async (req, res) => {
   try {
@@ -61,14 +62,25 @@ app.post('/extract-pptx-text', async (req, res) => {
   try {
     if (!req.body.url) return res.status(400).json({ error: 'No PPTX URL provided.' });
     const tempPath = await downloadToTemp(req.body.url, 'pptx');
-    pptxParser(tempPath, (err, data) => {
+    console.log(`[PPTX] Downloaded to: ${tempPath}`);
+    officeparser.parseOffice(tempPath, (err, data) => {
       fs.unlinkSync(tempPath);
-      if (err) return res.status(500).json({ error: err.message });
-      // data is an array of slides, each with text
-      const text = data.map(slide => slide.text).join('\n\n');
+      let text;
+      if (err && typeof err === 'string' && !data) {
+        text = err;
+        console.log('[PPTX] Extraction success, text length:', text.length);
+        return res.json({ text });
+      }
+      if (err) {
+        console.error('[PPTX] Extraction error:', err);
+        return res.status(500).json({ error: err.message || String(err) });
+      }
+      text = data;
+      console.log('[PPTX] Extraction success, text length:', text.length);
       res.json({ text });
     });
   } catch (err) {
+    console.error('[PPTX] Endpoint error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -78,10 +90,25 @@ app.post('/extract-docx-text', async (req, res) => {
   try {
     if (!req.body.url) return res.status(400).json({ error: 'No DOCX URL provided.' });
     const tempPath = await downloadToTemp(req.body.url, 'docx');
-    const result = await mammoth.extractRawText({ path: tempPath });
-    fs.unlinkSync(tempPath);
-    res.json({ text: result.value });
+    console.log(`[DOCX] Downloaded to: ${tempPath}`);
+    officeparser.parseOffice(tempPath, (err, data) => {
+      fs.unlinkSync(tempPath);
+      let text;
+      if (err && typeof err === 'string' && !data) {
+        text = err;
+        console.log('[DOCX] Extraction success, text length:', text.length);
+        return res.json({ text });
+      }
+      if (err) {
+        console.error('[DOCX] Extraction error:', err);
+        return res.status(500).json({ error: err.message || String(err) });
+      }
+      text = data;
+      console.log('[DOCX] Extraction success, text length:', text.length);
+      res.json({ text });
+    });
   } catch (err) {
+    console.error('[DOCX] Endpoint error:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -91,16 +118,25 @@ app.post('/extract-xlsx-text', async (req, res) => {
   try {
     if (!req.body.url) return res.status(400).json({ error: 'No XLSX URL provided.' });
     const tempPath = await downloadToTemp(req.body.url, 'xlsx');
-    const workbook = XLSX.readFile(tempPath);
-    fs.unlinkSync(tempPath);
-    let text = '';
-    workbook.SheetNames.forEach(sheetName => {
-      const sheet = workbook.Sheets[sheetName];
-      const csv = XLSX.utils.sheet_to_csv(sheet);
-      text += `Sheet: ${sheetName}\n${csv}\n`;
+    console.log(`[XLSX] Downloaded to: ${tempPath}`);
+    officeparser.parseOffice(tempPath, (err, data) => {
+      fs.unlinkSync(tempPath);
+      let text;
+      if (err && typeof err === 'string' && !data) {
+        text = err;
+        console.log('[XLSX] Extraction success, text length:', text.length);
+        return res.json({ text });
+      }
+      if (err) {
+        console.error('[XLSX] Extraction error:', err);
+        return res.status(500).json({ error: err.message || String(err) });
+      }
+      text = data;
+      console.log('[XLSX] Extraction success, text length:', text.length);
+      res.json({ text });
     });
-    res.json({ text });
   } catch (err) {
+    console.error('[XLSX] Endpoint error:', err);
     res.status(500).json({ error: err.message });
   }
 });

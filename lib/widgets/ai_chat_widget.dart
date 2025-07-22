@@ -347,21 +347,27 @@ class _AIChatWidgetState extends State<AIChatWidget> {
           child: Row(
             children: [
               Expanded(
-                child: TextField(
-                  controller: _questionController,
-                  decoration: InputDecoration(
-                    hintText: 'Ask a question about ${widget.fileName}...',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxHeight: 120, // Maximum height for the text input
                   ),
-                  maxLines: null,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _sendMessage(),
+                  child: TextField(
+                    controller: _questionController,
+                    decoration: InputDecoration(
+                      hintText: 'Ask a question about ${widget.fileName}...',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                    ),
+                    maxLines: null,
+                    minLines: 1,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _sendMessage(),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -449,10 +455,14 @@ class ChatMessageWidget extends StatelessWidget {
                           children: [
                             IconButton(
                               onPressed: () {
-                                Clipboard.setData(ClipboardData(text: message.text));
+                                Clipboard.setData(
+                                  ClipboardData(text: message.text),
+                                );
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text('Response copied to clipboard'),
+                                    content: Text(
+                                      'Response copied to clipboard',
+                                    ),
                                     duration: Duration(seconds: 2),
                                   ),
                                 );

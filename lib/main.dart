@@ -233,6 +233,8 @@ class _HomeScreenState extends State<HomeScreen> {
         onToggleSidebar:
             () => setState(() => _sidebarCollapsed = !_sidebarCollapsed),
         selectedFileId: _previewFile?.id,
+        onMoveFile: _moveFile,
+        onMoveFolder: _moveFolder,
       );
 
       /* Main content area */
@@ -306,9 +308,64 @@ class _HomeScreenState extends State<HomeScreen> {
           onPickFiles: _pickFiles,
           onDropFiles: (fs) => _handleDroppedFiles(fs, _selectedFolder),
           onOpenUrl: _openUrl,
-          previewFile: null,
+          previewFile: _previewFile,
           onSelectFile: (file) => setState(() => _previewFile = file),
-          onDeleteFile: null,
+          onDeleteFile:
+              _previewFile != null
+                  ? (file) async {
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      builder:
+                          (ctx) => AlertDialog(
+                            title: const Text('Delete File'),
+                            content: Text(
+                              'Are you sure you want to delete "${file.name}"? This action cannot be undone.',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.of(ctx).pop(false),
+                                child: const Text('Cancel'),
+                              ),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red,
+                                ),
+                                onPressed: () => Navigator.of(ctx).pop(true),
+                                child: const Text('Delete'),
+                              ),
+                            ],
+                          ),
+                    );
+                    if (confirmed != true) return;
+                    final uid = FirebaseAuth.instance.currentUser!.uid;
+                    String storagePath;
+                    DocumentReference docRef;
+                    if (file.folderId == null) {
+                      // Top-level file
+                      storagePath = 'users/$uid/files/${file.name}';
+                      docRef = FirebaseFirestore.instance.doc(
+                        'users/$uid/files/${file.id}',
+                      );
+                    } else {
+                      // File in folder
+                      storagePath =
+                          'users/$uid/folders/${file.folderId}/${file.name}';
+                      docRef = FirebaseFirestore.instance.doc(
+                        'users/$uid/folders/${file.folderId}/files/${file.id}',
+                      );
+                    }
+                    try {
+                      await FirebaseStorage.instance.ref(storagePath).delete();
+                      await docRef.delete();
+                      if (mounted) {
+                        setState(() => _previewFile = null);
+                        _snack('File deleted');
+                      }
+                    } catch (e) {
+                      _snack('Failed to delete file: $e', err: true);
+                    }
+                  }
+                  : null,
         );
       } else {
         // Show welcome/upload screen (no folder or file selected)
@@ -512,5 +569,71 @@ class _HomeScreenState extends State<HomeScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: err ? Colors.red : null),
     );
+  }
+
+  /* ── drag & drop operations ─────────────────────────────── */
+  Future<void> _moveFile(FileMeta file, String? targetFolderId) async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+
+      // Update Firestore document
+      DocumentReference docRef;
+      if (file.folderId == null) {
+        // Moving from top level
+        docRef = FirebaseFirestore.instance.doc('users/$uid/files/${file.id}');
+      } else {
+        // Moving from a folder
+        docRef = FirebaseFirestore.instance.doc(
+          'users/$uid/folders/${file.folderId}/files/${file.id}',
+        );
+      }
+
+      await docRef.update({'folderId': targetFolderId});
+
+      // Move file in Firebase Storage
+      final oldPath =
+          file.folderId == null
+              ? 'users/$uid/files/${file.name}'
+              : 'users/$uid/folders/${file.folderId}/${file.name}';
+
+      final newPath =
+          targetFolderId == null
+              ? 'users/$uid/files/${file.name}'
+              : 'users/$uid/folders/$targetFolderId/${file.name}';
+
+      if (oldPath != newPath) {
+        final oldRef = FirebaseStorage.instance.ref(oldPath);
+        final newRef = FirebaseStorage.instance.ref(newPath);
+
+        // Copy to new location
+        final fileData = await oldRef.getData();
+        if (fileData != null) {
+          await newRef.putData(fileData);
+        } else {
+          throw Exception('Failed to read file data');
+        }
+
+        // Delete from old location
+        await oldRef.delete();
+
+        // Update URL in Firestore
+        final newUrl = await newRef.getDownloadURL();
+        await docRef.update({'url': newUrl});
+      }
+
+      _snack('File moved successfully');
+    } catch (e) {
+      _snack('Failed to move file: $e', err: true);
+    }
+  }
+
+  Future<void> _moveFolder(String folderId, int newIndex) async {
+    try {
+      // For now, just show a message since folder reordering is complex
+      // and would require updating all folder documents with new order
+      _snack('Folder reordering coming soon!');
+    } catch (e) {
+      _snack('Failed to move folder: $e', err: true);
+    }
   }
 }
