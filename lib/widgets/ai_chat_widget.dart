@@ -28,6 +28,16 @@ class _AIChatWidgetState extends State<AIChatWidget> {
   bool _isLoading = false;
   String? _errorMessage;
 
+  // For typing indicator
+  bool _aiTyping = false;
+
+  // Quick prompt suggestions
+  final List<String> _quickPrompts = [
+    "Summarize this file",
+    "List the main points",
+    "What is this about?",
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -52,8 +62,8 @@ class _AIChatWidgetState extends State<AIChatWidget> {
     super.dispose();
   }
 
-  Future<void> _sendMessage() async {
-    final question = _questionController.text.trim();
+  Future<void> _sendMessage({String? prompt}) async {
+    final question = prompt ?? _questionController.text.trim();
     if (question.isEmpty) return;
 
     setState(() {
@@ -61,6 +71,7 @@ class _AIChatWidgetState extends State<AIChatWidget> {
         ChatMessage(text: question, isUser: true, timestamp: DateTime.now()),
       );
       _isLoading = true;
+      _aiTyping = true;
       _errorMessage = null;
     });
 
@@ -77,6 +88,7 @@ class _AIChatWidgetState extends State<AIChatWidget> {
 
       setState(() {
         _isLoading = false;
+        _aiTyping = false;
         if (response.success) {
           _messages.add(
             ChatMessage(
@@ -104,83 +116,8 @@ class _AIChatWidgetState extends State<AIChatWidget> {
     } catch (e) {
       setState(() {
         _isLoading = false;
+        _aiTyping = false;
         _errorMessage = 'Failed to get response: ${e.toString()}';
-      });
-    }
-
-    _scrollToBottom();
-  }
-
-  Future<void> _generateSummary() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final response = await _aiService.generateSummary(
-        fileName: widget.fileName,
-        fileType: widget.fileType,
-        fileContent: widget.fileContent,
-      );
-
-      setState(() {
-        _isLoading = false;
-        if (response.success) {
-          _messages.add(
-            ChatMessage(
-              text:
-                  '**Summary of ${widget.fileName}:**\n\n${response.data!['summary']}',
-              isUser: false,
-              timestamp: DateTime.now(),
-            ),
-          );
-        } else {
-          _errorMessage = response.message;
-        }
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Failed to generate summary: ${e.toString()}';
-      });
-    }
-
-    _scrollToBottom();
-  }
-
-  Future<void> _analyzeFile() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final response = await _aiService.analyzeFile(
-        fileName: widget.fileName,
-        fileType: widget.fileType,
-        fileContent: widget.fileContent,
-      );
-
-      setState(() {
-        _isLoading = false;
-        if (response.success) {
-          _messages.add(
-            ChatMessage(
-              text:
-                  '**Analysis of ${widget.fileName}:**\n\n${response.data!['analysis']}',
-              isUser: false,
-              timestamp: DateTime.now(),
-            ),
-          );
-        } else {
-          _errorMessage = response.message;
-        }
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Failed to analyze file: ${e.toString()}';
       });
     }
 
@@ -203,11 +140,11 @@ class _AIChatWidgetState extends State<AIChatWidget> {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Header with quick actions
+        // Header with quick actions and menu
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Theme.of(context).primaryColor.withOpacity(0.1),
+            color: Theme.of(context).primaryColor.withOpacity(0.08),
             border: Border(
               bottom: BorderSide(
                 color: Theme.of(context).dividerColor,
@@ -231,37 +168,68 @@ class _AIChatWidgetState extends State<AIChatWidget> {
                   ),
                 ),
               ),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert),
+                tooltip: 'More actions',
+                itemBuilder:
+                    (context) => [
+                      PopupMenuItem(
+                        value: 'clear',
+                        child: Row(
+                          children: const [
+                            Icon(Icons.clear_all, size: 18),
+                            SizedBox(width: 8),
+                            Text('Clear chat'),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'export',
+                        child: Row(
+                          children: const [
+                            Icon(Icons.download, size: 18),
+                            SizedBox(width: 8),
+                            Text('Export chat'),
+                          ],
+                        ),
+                      ),
+                    ],
+                onSelected: (value) {
+                  if (value == 'clear') {
+                    setState(() {
+                      _messages.clear();
+                      _addWelcomeMessage();
+                    });
+                  }
+                  // Implement export if needed
+                },
+              ),
             ],
           ),
         ),
 
-        // Quick action buttons
+        // Quick prompt chips
         Container(
+          width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _isLoading ? null : _analyzeFile,
-                  icon: const Icon(Icons.analytics, size: 16),
-                  label: const Text('Analyze'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: _isLoading ? null : _generateSummary,
-                  icon: const Icon(Icons.summarize, size: 16),
-                  label: const Text('Summary'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                  ),
-                ),
-              ),
-            ],
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children:
+                _quickPrompts.map((prompt) {
+                  return ActionChip(
+                    label: Text(prompt),
+                    onPressed:
+                        _isLoading ? null : () => _sendMessage(prompt: prompt),
+                    backgroundColor: Theme.of(
+                      context,
+                    ).primaryColor.withOpacity(0.12),
+                    labelStyle: TextStyle(
+                      color: Theme.of(context).primaryColor,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  );
+                }).toList(),
           ),
         ),
 
@@ -277,11 +245,11 @@ class _AIChatWidgetState extends State<AIChatWidget> {
                   : ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.all(16),
-                    itemCount: _messages.length + (_isLoading ? 1 : 0),
+                    itemCount: _messages.length + (_aiTyping ? 1 : 0),
                     itemBuilder: (context, index) {
-                      if (index == _messages.length && _isLoading) {
+                      if (index == _messages.length && _aiTyping) {
                         return const Padding(
-                          padding: EdgeInsets.all(16),
+                          padding: EdgeInsets.symmetric(vertical: 8),
                           child: Row(
                             children: [
                               SizedBox(
@@ -292,7 +260,7 @@ class _AIChatWidgetState extends State<AIChatWidget> {
                                 ),
                               ),
                               SizedBox(width: 16),
-                              Text('AI is thinking...'),
+                              Text('AI is typing...'),
                             ],
                           ),
                         );
@@ -371,12 +339,22 @@ class _AIChatWidgetState extends State<AIChatWidget> {
                 ),
               ),
               const SizedBox(width: 8),
-              IconButton(
-                onPressed: _isLoading ? null : _sendMessage,
-                icon: const Icon(Icons.send),
-                style: IconButton.styleFrom(
-                  backgroundColor: Theme.of(context).primaryColor,
-                  foregroundColor: Colors.white,
+              Tooltip(
+                message: 'Send',
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  decoration: BoxDecoration(
+                    color:
+                        _isLoading
+                            ? Colors.grey
+                            : Theme.of(context).primaryColor,
+                    shape: BoxShape.circle,
+                  ),
+                  child: IconButton(
+                    onPressed: _isLoading ? null : _sendMessage,
+                    icon: const Icon(Icons.send),
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ],
@@ -445,6 +423,14 @@ class ChatMessageWidget extends StatelessWidget {
                               color: Theme.of(context).dividerColor,
                               width: 1,
                             ),
+                    boxShadow: [
+                      if (!message.isUser)
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.04),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                    ],
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,

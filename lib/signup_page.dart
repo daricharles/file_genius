@@ -7,6 +7,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 
 import 'main.dart';
 import 'verify_email_screen.dart';
+import 'package:file_genius/login_page.dart'; // Add this import if not present
 
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key});
@@ -23,6 +24,11 @@ class _SignupPageState extends State<SignupPage> {
   final TextEditingController _repeatPasswordController =
       TextEditingController();
   final _formKey = GlobalKey<FormState>();
+
+  bool _obscurePassword = true;
+  bool _obscureRepeatPassword = true;
+  bool _isLoading = false;
+  String? _errorMessage;
 
   @override
   void dispose() {
@@ -176,7 +182,7 @@ class _SignupPageState extends State<SignupPage> {
                     // Password
                     TextFormField(
                       controller: _passwordController,
-                      obscureText: true,
+                      obscureText: _obscurePassword,
                       decoration: InputDecoration(
                         labelText: 'Password',
                         hintText: 'Enter your password',
@@ -186,6 +192,23 @@ class _SignupPageState extends State<SignupPage> {
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8.0),
                           borderSide: BorderSide.none,
+                        ),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscurePassword
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                            color: const Color(0xFF4A789C),
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _obscurePassword = !_obscurePassword;
+                            });
+                          },
+                          tooltip:
+                              _obscurePassword
+                                  ? 'Show password'
+                                  : 'Hide password',
                         ),
                       ),
                       validator: (value) {
@@ -204,7 +227,7 @@ class _SignupPageState extends State<SignupPage> {
                     // Repeat Password
                     TextFormField(
                       controller: _repeatPasswordController,
-                      obscureText: true,
+                      obscureText: _obscureRepeatPassword,
                       decoration: InputDecoration(
                         labelText: 'Repeat password',
                         hintText: 'Repeat your password',
@@ -214,6 +237,23 @@ class _SignupPageState extends State<SignupPage> {
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8.0),
                           borderSide: BorderSide.none,
+                        ),
+                        suffixIcon: IconButton(
+                          icon: Icon(
+                            _obscureRepeatPassword
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                            color: const Color(0xFF4A789C),
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _obscureRepeatPassword = !_obscureRepeatPassword;
+                            });
+                          },
+                          tooltip:
+                              _obscureRepeatPassword
+                                  ? 'Show password'
+                                  : 'Hide password',
                         ),
                       ),
                       validator: (value) {
@@ -229,12 +269,39 @@ class _SignupPageState extends State<SignupPage> {
 
                     const SizedBox(height: 24),
 
+                    if (_errorMessage != null)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          border: Border.all(color: Colors.red.shade200),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.error_outline,
+                              color: Colors.red.shade600,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _errorMessage!,
+                                style: TextStyle(color: Colors.red.shade700),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
                     // Google Sign-Up
                     SizedBox(
                       width: double.infinity,
                       height: 40,
                       child: ElevatedButton.icon(
-                        onPressed: signInWithGoogle,
+                        onPressed: _isLoading ? null : signInWithGoogle,
                         icon: Image.asset(
                           'assets/images/google_logo.png',
                           height: 24.0,
@@ -258,21 +325,32 @@ class _SignupPageState extends State<SignupPage> {
                       width: double.infinity,
                       height: 40,
                       child: ElevatedButton(
-                        onPressed: () async {
-                          if (_formKey.currentState!.validate()) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Creating account...'),
-                              ),
-                            );
-
-                            await signUp(
-                              _emailController.text.trim(),
-                              _passwordController.text.trim(),
-                              _fullNameController.text.trim(),
-                            );
-                          }
-                        },
+                        onPressed:
+                            _isLoading
+                                ? null
+                                : () async {
+                                  if (_formKey.currentState!.validate()) {
+                                    setState(() {
+                                      _isLoading = true;
+                                      _errorMessage = null;
+                                    });
+                                    try {
+                                      await signUp(
+                                        _emailController.text.trim(),
+                                        _passwordController.text.trim(),
+                                        _fullNameController.text.trim(),
+                                      );
+                                    } catch (e) {
+                                      setState(() {
+                                        _errorMessage = 'Sign up failed: $e';
+                                      });
+                                    } finally {
+                                      setState(() {
+                                        _isLoading = false;
+                                      });
+                                    }
+                                  }
+                                },
                         style: ElevatedButton.styleFrom(
                           foregroundColor: Colors.white,
                           backgroundColor: const Color(0xFF0A87E3),
@@ -281,7 +359,17 @@ class _SignupPageState extends State<SignupPage> {
                             borderRadius: BorderRadius.circular(8.0),
                           ),
                         ),
-                        child: const Text('Sign up'),
+                        child:
+                            _isLoading
+                                ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2.5,
+                                  ),
+                                )
+                                : const Text('Sign up'),
                       ),
                     ),
 
@@ -293,7 +381,7 @@ class _SignupPageState extends State<SignupPage> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) => const HomeScreen(),
+                            builder: (context) => const LoginPage(),
                           ),
                         );
                       },

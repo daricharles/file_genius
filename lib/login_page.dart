@@ -22,6 +22,7 @@ class _LoginPageState extends State<LoginPage> {
   final TextEditingController _passwordController = TextEditingController();
   String? errorMessage;
   bool isLoading = false;
+  bool _obscurePassword = true; // <-- Add this for password toggle
 
   @override
   void dispose() {
@@ -251,7 +252,7 @@ class _LoginPageState extends State<LoginPage> {
 
                       TextFormField(
                         controller: _passwordController,
-                        obscureText: true,
+                        obscureText: _obscurePassword,
                         decoration: InputDecoration(
                           labelText: 'Password',
                           hintText: 'Enter your password',
@@ -261,6 +262,23 @@ class _LoginPageState extends State<LoginPage> {
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
                             borderSide: BorderSide.none,
+                          ),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscurePassword
+                                  ? Icons.visibility_off
+                                  : Icons.visibility,
+                              color: const Color(0xFF4A789C),
+                            ),
+                            onPressed: () {
+                              setState(() {
+                                _obscurePassword = !_obscurePassword;
+                              });
+                            },
+                            tooltip:
+                                _obscurePassword
+                                    ? 'Show password'
+                                    : 'Hide password',
                           ),
                         ),
                         validator: (value) {
@@ -291,48 +309,78 @@ class _LoginPageState extends State<LoginPage> {
                       ),
 
                       if (errorMessage != null)
-                        Text(
-                          errorMessage!,
-                          style: const TextStyle(color: Colors.red),
-                        ),
-
-                      const SizedBox(height: 16),
-
-                      isLoading
-                          ? const CircularProgressIndicator()
-                          : SizedBox(
-                            width: double.infinity,
-                            height: 40,
-                            child: ElevatedButton(
-                              onPressed: () {
-                                if (_formKey.currentState!.validate()) {
-                                  signIn(
-                                    _emailController.text.trim(),
-                                    _passwordController.text.trim(),
-                                  );
-                                }
-                              },
-                              style: ElevatedButton.styleFrom(
-                                foregroundColor: Colors.white,
-                                backgroundColor: const Color(0xFF0A87E3),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8.0),
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            border: Border.all(color: Colors.red.shade200),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.error_outline,
+                                color: Colors.red.shade600,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  errorMessage!,
+                                  style: TextStyle(color: Colors.red.shade700),
                                 ),
                               ),
-                              child: const Text("Log in"),
-                            ),
+                            ],
                           ),
+                        ),
 
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 8),
 
                       SizedBox(
                         width: double.infinity,
-                        height: 40,
+                        height: 44,
+                        child: ElevatedButton(
+                          onPressed:
+                              isLoading
+                                  ? null
+                                  : () {
+                                    if (_formKey.currentState!.validate()) {
+                                      signIn(
+                                        _emailController.text.trim(),
+                                        _passwordController.text.trim(),
+                                      );
+                                    }
+                                  },
+                          style: ElevatedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            backgroundColor: const Color(0xFF0A87E3),
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8.0),
+                            ),
+                          ),
+                          child:
+                              isLoading
+                                  ? const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2.5,
+                                    ),
+                                  )
+                                  : const Text("Log in"),
+                        ),
+                      ),
+
+                      const SizedBox(height: 20),
+
+                      SizedBox(
+                        width: double.infinity,
+                        height: 44,
                         child: ElevatedButton.icon(
-                          onPressed: signInWithGoogle,
+                          onPressed: isLoading ? null : signInWithGoogle,
                           icon: Image.asset(
                             'assets/images/google_logo.png',
                             height: 24.0,
@@ -340,10 +388,12 @@ class _LoginPageState extends State<LoginPage> {
                           label: const Text('Sign up with Google'),
                           style: ElevatedButton.styleFrom(
                             foregroundColor: Colors.black87,
-                            backgroundColor: const Color(0xFFE8EDF5),
+                            backgroundColor: Colors.white,
+                            elevation: 1,
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8.0),
+                              side: const BorderSide(color: Color(0xFFE8EDF5)),
                             ),
                           ),
                         ),

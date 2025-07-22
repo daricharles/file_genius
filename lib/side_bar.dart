@@ -84,19 +84,27 @@ class FileGeniusSidebar extends StatelessWidget {
             label: 'Upload File',
             onTap: onUploadFile,
           ),
+          const SizedBox(height: 8),
           const Divider(),
           const Padding(
-            padding: EdgeInsets.only(left: 16, top: 8),
+            padding: EdgeInsets.only(left: 16, top: 8, bottom: 4),
             child: Text(
-              'Files & Folders',
-              style: TextStyle(color: Colors.grey),
+              'FILES & FOLDERS',
+              style: TextStyle(
+                color: Colors.grey,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.2,
+                fontSize: 13,
+              ),
             ),
           ),
           // Scrollable tree with drop zones
           Expanded(
             child: DragTarget<String>(
-              onWillAccept: (data) => data?.startsWith('folder:') == true,
-              onAccept: (data) {
+              onWillAcceptWithDetails:
+                  (details) => details.data.startsWith('folder:'),
+              onAcceptWithDetails: (details) {
+                final data = details.data;
                 final folderId = data.substring(7); // Remove 'folder:' prefix
                 final folderIndex = folders.indexWhere((f) => f.id == folderId);
                 if (folderIndex != -1) {
@@ -105,16 +113,15 @@ class FileGeniusSidebar extends StatelessWidget {
               },
               builder: (context, candidateData, rejectedData) {
                 return DragTarget<FileMeta>(
-                  onWillAccept: (file) => true,
-                  onAccept: (file) {
-                    onMoveFile?.call(file, null); // Move to top level
+                  onWillAcceptWithDetails: (details) => true,
+                  onAcceptWithDetails: (details) {
+                    onMoveFile?.call(details.data, null); // Move to top level
                   },
                   builder: (context, candidateData, rejectedData) {
                     return ListView(
+                      padding: const EdgeInsets.only(top: 4, bottom: 4),
                       children: [
-                        // 1) top‑level (un‑foldered) files
                         ...topLevelFiles.map((f) => _topFileTile(f)),
-                        // 2) user folders with nested files
                         ...folders.map((f) => _buildFolderTile(context, f)),
                       ],
                     );
@@ -123,7 +130,7 @@ class FileGeniusSidebar extends StatelessWidget {
               },
             ),
           ),
-          const Divider(),
+          const Divider(height: 24),
           _UserSection(onSignOut: onSignOut, onUpgradePlan: onUpgradePlan),
         ],
       ],
@@ -141,9 +148,12 @@ class FileGeniusSidebar extends StatelessWidget {
       children: [
         // Draggable folder with drop zone
         DragTarget<FileMeta>(
-          onWillAccept: (file) => file != null,
-          onAccept: (file) {
-            onMoveFile?.call(file, folder.id); // Move file into this folder
+          onWillAcceptWithDetails: (details) => true,
+          onAcceptWithDetails: (details) {
+            onMoveFile?.call(
+              details.data,
+              folder.id,
+            ); // Move file into this folder
           },
           builder: (context, candidateData, rejectedData) {
             return Draggable<String>(
@@ -151,7 +161,10 @@ class FileGeniusSidebar extends StatelessWidget {
               feedback: Material(
                 elevation: 4,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.blue.shade100,
                     borderRadius: BorderRadius.circular(8),
@@ -161,7 +174,10 @@ class FileGeniusSidebar extends StatelessWidget {
                     children: [
                       const Icon(Icons.folder, color: Colors.blue),
                       const SizedBox(width: 8),
-                      Text(folder.name, style: const TextStyle(color: Colors.blue)),
+                      Text(
+                        folder.name,
+                        style: const TextStyle(color: Colors.blue),
+                      ),
                     ],
                   ),
                 ),
@@ -173,24 +189,25 @@ class FileGeniusSidebar extends StatelessWidget {
                   isCollapsed,
                   isSelected,
                   kids,
+                  isDropTarget: candidateData.isNotEmpty,
                 ),
               ),
-              child: Container(
-                decoration: BoxDecoration(
-                  border: candidateData.isNotEmpty
-                      ? Border.all(color: Colors.blue, width: 2)
-                      : null,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: _buildFolderTileContent(folder, isCollapsed, isSelected, kids),
+              child: _buildFolderTileContent(
+                folder,
+                isCollapsed,
+                isSelected,
+                kids,
+                isDropTarget: candidateData.isNotEmpty,
               ),
             );
           },
         ),
         if (!isCollapsed && kids.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(left: 16.0),
-            child: Column(children: kids.map((f) => _fileTile(f)).toList()),
+            padding: const EdgeInsets.only(left: 24.0),
+            child: Column(
+              children: kids.map((f) => _fileTile(f, nested: true)).toList(),
+            ),
           ),
       ],
     );
@@ -200,40 +217,59 @@ class FileGeniusSidebar extends StatelessWidget {
     Folder folder,
     bool isCollapsed,
     bool isSelected,
-    List<FileMeta> kids,
-  ) {
+    List<FileMeta> kids, {
+    bool isDropTarget = false,
+  }) {
     return MouseRegion(
-      onEnter: (_) => {},
-      onExit: (_) => {},
-      child: GestureDetector(
-        onTap: () => onSelectFolder(folder.id),
-        child: Container(
-          color: isSelected ? Colors.grey[300] : null,
-          child: ListTile(
-            leading: const Icon(Icons.folder),
-            title: Text(folder.name),
-            trailing:
-                kids.isEmpty
-                    ? null
-                    : GestureDetector(
-                      onTap: () => onToggleFolder(folder.id),
-                      child: Icon(
-                        isCollapsed
-                            ? Icons.keyboard_arrow_right
-                            : Icons.keyboard_arrow_down,
-                        size: 20,
-                      ),
-                    ),
-            tileColor: isSelected ? Colors.grey[300] : null,
-            hoverColor: Colors.grey[200],
-            selected: isSelected,
+      cursor: SystemMouseCursors.click,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        decoration: BoxDecoration(
+          color:
+              isSelected
+                  ? kBrand.withOpacity(0.10)
+                  : isDropTarget
+                  ? Colors.blue.withOpacity(0.08)
+                  : null,
+          border:
+              isSelected
+                  ? Border(left: BorderSide(color: kBrand, width: 4))
+                  : null,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: ListTile(
+          leading: Icon(Icons.folder, color: isSelected ? kBrand : Colors.blue),
+          title: Text(
+            folder.name,
+            style: TextStyle(
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              color: isSelected ? kBrand : null,
+            ),
           ),
+          trailing: IconButton(
+            icon: Icon(
+              isCollapsed
+                  ? Icons.keyboard_arrow_right
+                  : Icons.keyboard_arrow_down,
+              size: 22,
+              color: Colors.grey[700],
+            ),
+            tooltip: isCollapsed ? 'Expand' : 'Collapse',
+            onPressed: () => onToggleFolder(folder.id),
+            splashRadius: 18,
+          ),
+          tileColor: Colors.transparent,
+          hoverColor: Colors.grey[200],
+          selected: isSelected,
+          dense: true,
+          contentPadding: const EdgeInsets.only(left: 8, right: 4),
+          onTap: () => onSelectFolder(folder.id),
         ),
       ),
     );
   }
 
-  Widget _fileTile(FileMeta f) {
+  Widget _fileTile(FileMeta f, {bool nested = false}) {
     final isSelected = selectedFileId == f.id;
     return Draggable<FileMeta>(
       data: f,
@@ -264,37 +300,48 @@ class FileGeniusSidebar extends StatelessWidget {
       ),
       childWhenDragging: Opacity(
         opacity: 0.3,
-        child: _buildFileTileContent(f, isSelected),
+        child: _buildFileTileContent(f, isSelected, nested: nested),
       ),
-      child: _buildFileTileContent(f, isSelected),
+      child: _buildFileTileContent(f, isSelected, nested: nested),
     );
   }
 
-  Widget _buildFileTileContent(FileMeta f, bool isSelected) {
+  Widget _buildFileTileContent(
+    FileMeta f,
+    bool isSelected, {
+    bool nested = false,
+  }) {
     return MouseRegion(
-      onEnter: (_) => {},
-      onExit: (_) => {},
-      child: GestureDetector(
-        onTap: () {
-          onSelectAnyFile?.call(f);
-          onSelectTopFile?.call(f);
-        },
-        child: Container(
-          color: isSelected ? Colors.grey[300] : null,
-          child: ListTile(
-            dense: true,
-            leading: const Icon(Icons.insert_drive_file_outlined, size: 18),
-            title: Text(f.name, style: const TextStyle(fontSize: 13)),
-            tileColor: isSelected ? Colors.grey[300] : null,
-            hoverColor: Colors.grey[200],
-            selected: isSelected,
-          ),
+      cursor: SystemMouseCursors.click,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        decoration: BoxDecoration(
+          color: isSelected ? kBrand.withOpacity(0.10) : null,
+          border:
+              isSelected
+                  ? Border(left: BorderSide(color: kBrand, width: 4))
+                  : null,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        margin: nested ? const EdgeInsets.only(left: 8) : null,
+        child: ListTile(
+          dense: true,
+          leading: const Icon(Icons.insert_drive_file_outlined, size: 18),
+          title: Text(f.name, style: const TextStyle(fontSize: 13)),
+          tileColor: Colors.transparent,
+          hoverColor: Colors.grey[200],
+          selected: isSelected,
+          contentPadding: const EdgeInsets.only(left: 8, right: 4),
+          onTap: () {
+            onSelectAnyFile?.call(f);
+            onSelectTopFile?.call(f);
+          },
         ),
       ),
     );
   }
 
-  Widget _topFileTile(FileMeta f) => _fileTile(f);
+  Widget _topFileTile(FileMeta f) => _fileTile(f, nested: false);
 }
 
 /*────────────────── cosmetics ──────────────────*/
@@ -371,6 +418,7 @@ class _SidebarButtonState extends State<_SidebarButton> {
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
@@ -414,6 +462,13 @@ class _UserSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
+    final displayName = user?.displayName;
+    final email = user?.email;
+    final avatarText =
+        (displayName?.isNotEmpty == true
+                ? displayName![0]
+                : (email?.isNotEmpty == true ? email![0] : 'U'))
+            .toUpperCase();
 
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -421,23 +476,60 @@ class _UserSection extends StatelessWidget {
         children: [
           CircleAvatar(
             backgroundColor: kBrand,
-            child: Text(
-              (user?.displayName?.isNotEmpty == true
-                      ? user!.displayName![0]
-                      : 'U')
-                  .toUpperCase(),
-            ),
+            radius: 24,
+            backgroundImage:
+                user?.photoURL != null ? NetworkImage(user!.photoURL!) : null,
+            child:
+                user?.photoURL == null
+                    ? Text(
+                      avatarText,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                      ),
+                    )
+                    : null,
           ),
           const SizedBox(height: 8),
           Text(
-            user?.displayName ?? user?.email ?? 'User',
+            displayName ?? email ?? 'User',
             textAlign: TextAlign.center,
+            style: const TextStyle(fontWeight: FontWeight.w600),
           ),
-          TextButton(
-            onPressed: onUpgradePlan,
-            child: const Text('Upgrade plan'),
+          const SizedBox(height: 2),
+          // Example plan badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade100,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Text(
+              'Free Plan',
+              style: TextStyle(
+                color: Colors.orange,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
-          OutlinedButton(onPressed: onSignOut, child: const Text('Sign out')),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.workspace_premium, color: Colors.orange),
+                tooltip: 'Upgrade plan',
+                onPressed: onUpgradePlan,
+              ),
+              IconButton(
+                icon: const Icon(Icons.logout, color: Colors.red),
+                tooltip: 'Sign out',
+                onPressed: onSignOut,
+              ),
+            ],
+          ),
         ],
       ),
     );

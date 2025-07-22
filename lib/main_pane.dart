@@ -24,7 +24,7 @@ import 'services/file_content_extractor.dart';
 import 'widgets/ai_chat_widget.dart';
 
 class MainPane extends StatelessWidget {
-  MainPane({
+  const MainPane({
     super.key,
     required this.selectedFolder,
     required this.files,
@@ -62,24 +62,49 @@ class MainPane extends StatelessWidget {
           );
           return Row(
             children: [
+              // Left: File preview pane
               Expanded(
                 flex: 1,
                 child: Column(
                   children: [
-                    // Header with file name, page indicator, and delete icon
+                    // Header with file name, info, and actions
                     Container(
                       padding: const EdgeInsets.all(16),
                       child: Row(
                         children: [
-                          // File name
+                          // File icon
+                          Icon(
+                            _iconForFileType(previewFile!.type),
+                            color: Colors.blue,
+                          ),
+                          const SizedBox(width: 8),
+                          // File name and info
                           Expanded(
-                            child: Text(
-                              previewFile!.name,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  previewFile!.name,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Text(
+                                  '${_formatFileSize(previewFile!.size)} • ${previewFile!.type}',
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
                             ),
+                          ),
+                          // Download icon
+                          IconButton(
+                            icon: const Icon(Icons.download_rounded),
+                            tooltip: 'Download file',
+                            onPressed: () => onOpenUrl(previewFile!.url),
                           ),
                           // Delete icon
                           IconButton(
@@ -94,9 +119,7 @@ class MainPane extends StatelessWidget {
                     // File viewer
                     Expanded(
                       child: FileViewer(
-                        key: ValueKey(
-                          previewFile!.id,
-                        ), // or previewFile!.url if id is not unique
+                        key: ValueKey(previewFile!.id),
                         fileUrl: previewFile!.url,
                         fileType: previewFile!.type.toLowerCase(),
                       ),
@@ -104,7 +127,12 @@ class MainPane extends StatelessWidget {
                   ],
                 ),
               ),
-              const VerticalDivider(width: 1),
+              // Split divider
+              Container(
+                width: 1,
+                color: Colors.grey[300],
+                margin: const EdgeInsets.symmetric(vertical: 12),
+              ),
               // Right pane: AI chat
               Expanded(
                 flex: 1,
@@ -113,6 +141,7 @@ class MainPane extends StatelessWidget {
                         ? Center(
                           child: Text(
                             'AI chat is not supported for this file type.',
+                            style: TextStyle(color: Colors.grey[600]),
                           ),
                         )
                         : (snapshot.connectionState == ConnectionState.waiting
@@ -135,9 +164,16 @@ class MainPane extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
+            Icon(Icons.folder_open, size: 64, color: Colors.blue[200]),
+            const SizedBox(height: 16),
             const Text(
               'Welcome to FileGenius',
               style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Start by uploading your files or selecting a folder.',
+              style: TextStyle(color: Colors.grey[600], fontSize: 16),
             ),
             const SizedBox(height: 24),
             DragDropZone(
@@ -153,6 +189,7 @@ class MainPane extends StatelessWidget {
     // ─── Folder selected: file list ───
     return Row(
       children: [
+        // Left: File list
         Expanded(
           flex: 1,
           child:
@@ -166,27 +203,81 @@ class MainPane extends StatelessWidget {
                       onFilesDropped: onDropFiles,
                     ),
                   )
-                  : ListView.builder(
+                  : ListView.separated(
                     padding: const EdgeInsets.all(16),
                     itemCount: files.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final file = files[index];
-                      return ListTile(
-                        leading: const Icon(Icons.picture_as_pdf),
-                        title: Text(file.name),
-                        subtitle: Text(
-                          '${(file.size / 1024).toStringAsFixed(1)} KB • ${file.type}',
+                      final isSelected = file == previewFile;
+                      return MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 120),
+                          decoration: BoxDecoration(
+                            color:
+                                isSelected
+                                    ? Colors.blue.withOpacity(0.08)
+                                    : null,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: ListTile(
+                            leading: Icon(
+                              _iconForFileType(file.type),
+                              color: Colors.blue,
+                            ),
+                            title: Text(
+                              file.name,
+                              style: TextStyle(
+                                fontWeight:
+                                    isSelected
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                              ),
+                            ),
+                            subtitle: Text(
+                              '${_formatFileSize(file.size)} • ${file.type}',
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Tooltip(
+                                  message: 'Open in new tab',
+                                  child: IconButton(
+                                    icon: const Icon(Icons.open_in_new),
+                                    onPressed: () => onOpenUrl(file.url),
+                                  ),
+                                ),
+                                Tooltip(
+                                  message: 'Delete file',
+                                  child: IconButton(
+                                    icon: const Icon(
+                                      Icons.delete,
+                                      color: Colors.red,
+                                    ),
+                                    onPressed: () => onDeleteFile?.call(file),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            onTap: () => onSelectFile?.call(file),
+                            selected: isSelected,
+                            hoverColor: Colors.blue.withOpacity(0.04),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
                         ),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.open_in_new),
-                          onPressed: () => onOpenUrl(file.url),
-                        ),
-                        onTap: () => onSelectFile?.call(file),
                       );
                     },
                   ),
         ),
-        const VerticalDivider(width: 1),
+        // Split divider
+        Container(
+          width: 1,
+          color: Colors.grey[300],
+          margin: const EdgeInsets.symmetric(vertical: 12),
+        ),
         // Right pane: Placeholder
         Expanded(
           flex: 1,
@@ -202,164 +293,24 @@ class MainPane extends StatelessWidget {
   }
 }
 
-class ChatPane extends StatefulWidget {
-  const ChatPane({super.key});
-
-  @override
-  State<ChatPane> createState() => _ChatPaneState();
+// Helper: File type icon
+IconData _iconForFileType(String type) {
+  final t = type.toLowerCase();
+  if (t.contains('pdf')) return Icons.picture_as_pdf;
+  if (t.contains('doc') || t.contains('word')) return Icons.description;
+  if (t.contains('xls') || t.contains('sheet')) return Icons.table_chart;
+  if (t.contains('ppt')) return Icons.slideshow;
+  if (t.contains('image')) return Icons.image;
+  if (t.contains('audio')) return Icons.audiotrack;
+  if (t.contains('video')) return Icons.videocam;
+  return Icons.insert_drive_file;
 }
 
-class _ChatPaneState extends State<ChatPane> {
-  final List<_ChatMessage> _messages = [];
-  final TextEditingController _controller = TextEditingController();
-  final ScrollController _scrollController = ScrollController();
-  bool _aiTyping = false; // Placeholder for future AI typing indicator
-
-  void _sendMessage() {
-    final text = _controller.text.trim();
-    if (text.isEmpty) return;
-    setState(() {
-      _messages.add(_ChatMessage(text: text, isUser: true));
-      _aiTyping = true;
-    });
-    _controller.clear();
-    // Simulate AI response after a short delay (for demo)
-    Future.delayed(const Duration(seconds: 1), () {
-      if (!mounted) return;
-      setState(() {
-        _messages.add(
-          _ChatMessage(
-            text: 'This is a placeholder AI response.',
-            isUser: false,
-          ),
-        );
-        _aiTyping = false;
-      });
-      _scrollToBottom();
-    });
-    _scrollToBottom();
+// Helper: Format file size
+String _formatFileSize(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  if (bytes < 1024 * 1024) {
+    return '${(bytes / 1024).toStringAsFixed(1)} KB';
   }
-
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Title bar
-        Container(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: const [
-              Expanded(
-                child: Text(
-                  'AI Chat',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const Divider(height: 1),
-        Expanded(
-          child: ListView.builder(
-            controller: _scrollController,
-            padding: const EdgeInsets.all(16),
-            itemCount: _messages.length + (_aiTyping ? 1 : 0),
-            itemBuilder: (context, index) {
-              if (_aiTyping && index == _messages.length) {
-                // Typing indicator
-                return Align(
-                  alignment: Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[200],
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Text('AI is typing...'),
-                  ),
-                );
-              }
-              final msg = _messages[index];
-              return Align(
-                alignment:
-                    msg.isUser ? Alignment.centerRight : Alignment.centerLeft,
-                child: Container(
-                  margin: const EdgeInsets.symmetric(vertical: 4),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: msg.isUser ? Colors.blue[100] : Colors.grey[200],
-                    borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(12),
-                      topRight: const Radius.circular(12),
-                      bottomLeft: Radius.circular(msg.isUser ? 12 : 0),
-                      bottomRight: Radius.circular(msg.isUser ? 0 : 12),
-                    ),
-                  ),
-                  child: Text(msg.text),
-                ),
-              );
-            },
-          ),
-        ),
-        const Divider(height: 1),
-        Padding(
-          padding: const EdgeInsets.all(8.0),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _controller,
-                  decoration: const InputDecoration(
-                    hintText: 'Type a message...',
-                    border: OutlineInputBorder(),
-                  ),
-                  onSubmitted: (_) => _sendMessage(),
-                ),
-              ),
-              const SizedBox(width: 8),
-              // Microphone icon for speech-to-text (future)
-              IconButton(
-                icon: const Icon(Icons.mic),
-                tooltip: 'Speak (coming soon)',
-                onPressed: () {
-                  // Placeholder for future speech-to-text
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Speech-to-text coming soon!'),
-                    ),
-                  );
-                },
-              ),
-              IconButton(icon: const Icon(Icons.send), onPressed: _sendMessage),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ChatMessage {
-  final String text;
-  final bool isUser;
-  _ChatMessage({required this.text, required this.isUser});
+  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
 }
