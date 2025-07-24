@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 // Firebase
 import 'package:firebase_core/firebase_core.dart';
@@ -43,6 +44,7 @@ Future<void> _safeSet(DocumentReference ref, Map<String, dynamic> data) async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await dotenv.load();
 
   // Register WebView platform for web
   if (kIsWeb) {

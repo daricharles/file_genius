@@ -38,6 +38,24 @@ class _AIChatWidgetState extends State<AIChatWidget> {
     "What is this about?",
   ];
 
+  final List<String> _roles = ['Student', 'Researcher', 'Teacher', 'Other'];
+  final List<String> _docTypes = [
+    'Notes',
+    'Lecture Slides',
+    'Exam Prep',
+    'Other',
+  ];
+  final List<String> _formats = [
+    'Bullet Points',
+    'Numbered List',
+    'Paragraph',
+    'Other',
+  ];
+
+  String? _selectedRole;
+  String? _selectedDocType;
+  String? _selectedFormat;
+
   @override
   void initState() {
     super.initState();
@@ -84,6 +102,9 @@ class _AIChatWidgetState extends State<AIChatWidget> {
         fileType: widget.fileType,
         fileContent: widget.fileContent,
         question: question,
+        userRole: _selectedRole,
+        docType: _selectedDocType,
+        preferredFormat: _selectedFormat,
       );
 
       setState(() {
@@ -230,6 +251,125 @@ class _AIChatWidgetState extends State<AIChatWidget> {
                     ),
                   );
                 }).toList(),
+          ),
+        ),
+
+        // Role, Doc Type, and Format selection
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // If the pane is less than 500px wide, stack vertically
+              if (constraints.maxWidth < 500) {
+                return Column(
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: _selectedRole,
+                      hint: const Text('Role'),
+                      items:
+                          _roles
+                              .map(
+                                (role) => DropdownMenuItem(
+                                  value: role,
+                                  child: Text(role),
+                                ),
+                              )
+                              .toList(),
+                      onChanged: (val) => setState(() => _selectedRole = val),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      value: _selectedDocType,
+                      hint: const Text('Doc Type'),
+                      items:
+                          _docTypes
+                              .map(
+                                (type) => DropdownMenuItem(
+                                  value: type,
+                                  child: Text(type),
+                                ),
+                              )
+                              .toList(),
+                      onChanged:
+                          (val) => setState(() => _selectedDocType = val),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      value: _selectedFormat,
+                      hint: const Text('Format'),
+                      items:
+                          _formats
+                              .map(
+                                (fmt) => DropdownMenuItem(
+                                  value: fmt,
+                                  child: Text(fmt),
+                                ),
+                              )
+                              .toList(),
+                      onChanged: (val) => setState(() => _selectedFormat = val),
+                    ),
+                  ],
+                );
+              } else {
+                // Wide: show in a row
+                return Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: _selectedRole,
+                        hint: const Text('Role'),
+                        items:
+                            _roles
+                                .map(
+                                  (role) => DropdownMenuItem(
+                                    value: role,
+                                    child: Text(role),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged: (val) => setState(() => _selectedRole = val),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: _selectedDocType,
+                        hint: const Text('Doc Type'),
+                        items:
+                            _docTypes
+                                .map(
+                                  (type) => DropdownMenuItem(
+                                    value: type,
+                                    child: Text(type),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged:
+                            (val) => setState(() => _selectedDocType = val),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: _selectedFormat,
+                        hint: const Text('Format'),
+                        items:
+                            _formats
+                                .map(
+                                  (fmt) => DropdownMenuItem(
+                                    value: fmt,
+                                    child: Text(fmt),
+                                  ),
+                                )
+                                .toList(),
+                        onChanged:
+                            (val) => setState(() => _selectedFormat = val),
+                      ),
+                    ),
+                  ],
+                );
+              }
+            },
           ),
         ),
 
