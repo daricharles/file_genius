@@ -45,8 +45,7 @@ class FileContentExtractor {
           body: jsonEncode({'url': fileUrl}),
         );
         if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          final text = data['text'] ?? '';
+          final text = response.body;
           if (text.trim().isEmpty) {
             return 'No extractable text found in this PDF.';
           }
@@ -121,8 +120,7 @@ class FileContentExtractor {
           body: jsonEncode({'url': fileUrl}),
         );
         if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          final text = data['text'] ?? '';
+          final text = response.body;
           if (text.trim().isEmpty) {
             return 'No extractable text found in this $fileType file.';
           }

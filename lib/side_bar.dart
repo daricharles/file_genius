@@ -1,13 +1,39 @@
+// ignore_for_file: deprecated_member_use, avoid_print
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'constants.dart';
 import 'models.dart';
 
-/// Pure UI – no Firebase calls.
 class FileGeniusSidebar extends StatelessWidget {
+  final List<Folder> folders;
+  final List<FileMeta> topLevelFiles;
+  final Map<String, List<FileMeta>> filesByFolder;
+  final String? selectedFolderId;
+  final Set<String> collapsed;
+  final VoidCallback onDashboardTap;
+  final VoidCallback onCreateFolder;
+  final VoidCallback onUploadFile;
+  final void Function(String folderId) onToggleFolder;
+  final void Function(String? folderId) onSelectFolder;
+  final void Function(FileMeta file)? onSelectTopFile;
+  final void Function(FileMeta file)? onSelectAnyFile;
+  final VoidCallback onSignOut;
+  final VoidCallback onUpgradePlan;
+  final bool sidebarCollapsed;
+  final VoidCallback onToggleSidebar;
+  final String? selectedFileId;
+  final void Function(FileMeta file, String? folderId)? onMoveFile;
+  final void Function(String folderId, int newIndex)? onMoveFolder;
+  final VoidCallback? onClearData;
+  final Future<void> Function(Folder folder)? onDeleteFolder;
+  final Future<void> Function(Folder folder, String newName)? onRenameFolder;
+  final Future<void> Function(FileMeta file)? onDeleteFile;
+
   const FileGeniusSidebar({
     super.key,
-    // data
     required this.folders,
     required this.topLevelFiles,
     required this.filesByFolder,
@@ -17,127 +43,119 @@ class FileGeniusSidebar extends StatelessWidget {
     required this.onCreateFolder,
     required this.onUploadFile,
     required this.onToggleFolder,
-    required this.onSelectFolder, // nullable id (= select a folder)
-    this.onSelectTopFile, // top‑level file click (now optional)
-    this.onSelectAnyFile, // fires for *any* file
+    required this.onSelectFolder,
+    this.onSelectTopFile,
+    this.onSelectAnyFile,
     required this.onSignOut,
     required this.onUpgradePlan,
     required this.sidebarCollapsed,
     required this.onToggleSidebar,
     required this.selectedFileId,
-    // Drag and drop callbacks
     this.onMoveFile,
     this.onMoveFolder,
+    this.onClearData,
+    this.onDeleteFolder,
+    this.onRenameFolder,
+    this.onDeleteFile,
   });
 
-  // ───────── DATA ─────────
-  final List<Folder> folders;
-  final List<FileMeta> topLevelFiles;
-  final Map<String, List<FileMeta>> filesByFolder;
-  final String? selectedFolderId;
-  final Set<String> collapsed; // folder‑ids
-  final bool sidebarCollapsed;
-  final VoidCallback onToggleSidebar;
-  final String? selectedFileId;
-
-  // ───────── CALLBACKS ─────────
-  final VoidCallback onDashboardTap;
-  final VoidCallback onCreateFolder;
-  final VoidCallback onUploadFile;
-  final void Function(String folderId) onToggleFolder;
-  final void Function(String? folderId) onSelectFolder;
-  final void Function(FileMeta file)? onSelectTopFile;
-  final void Function(FileMeta file)? onSelectAnyFile; // 🔸 optional
-  final VoidCallback onSignOut;
-  final VoidCallback onUpgradePlan;
-  // Drag and drop callbacks
-  final void Function(FileMeta file, String? targetFolderId)? onMoveFile;
-  final void Function(String folderId, int newIndex)? onMoveFolder;
-
-  // ────────────────────────────────────────── UI tree
-  @override
-  Widget build(BuildContext context) => AnimatedContainer(
-    duration: const Duration(milliseconds: 200),
-    width: sidebarCollapsed ? 48 : kSidebarW,
-    color: Colors.grey.shade100,
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _AppHeader(
-          onToggleSidebar: onToggleSidebar,
-          collapsed: sidebarCollapsed,
+  Widget _topFileTile(BuildContext context, FileMeta f) {
+    final isSelected = selectedFileId == f.id;
+    return Draggable<FileMeta>(
+      data: f,
+      feedback: Opacity(
+        opacity: 0.3,
+        child: Material(
+          child: _buildFileTileContent(context, f, isSelected, nested: false),
         ),
-        if (!sidebarCollapsed) ...[
-          // Core nav
-          _SidebarButton(
-            icon: Icons.dashboard,
-            label: 'Dashboard',
-            onTap: onDashboardTap,
-          ),
-          _SidebarButton(
-            icon: Icons.create_new_folder,
-            label: 'New Folder',
-            onTap: onCreateFolder,
-          ),
-          _SidebarButton(
-            icon: Icons.upload_file,
-            label: 'Upload File',
-            onTap: onUploadFile,
-          ),
-          const SizedBox(height: 8),
-          const Divider(),
-          const Padding(
-            padding: EdgeInsets.only(left: 16, top: 8, bottom: 4),
-            child: Text(
-              'FILES & FOLDERS',
-              style: TextStyle(
-                color: Colors.grey,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.2,
-                fontSize: 13,
-              ),
-            ),
-          ),
-          // Scrollable tree with drop zones
-          Expanded(
-            child: DragTarget<String>(
-              onWillAcceptWithDetails:
-                  (details) => details.data.startsWith('folder:'),
-              onAcceptWithDetails: (details) {
-                final data = details.data;
-                final folderId = data.substring(7); // Remove 'folder:' prefix
-                final folderIndex = folders.indexWhere((f) => f.id == folderId);
-                if (folderIndex != -1) {
-                  onMoveFolder?.call(folderId, 0); // Move to top
-                }
-              },
-              builder: (context, candidateData, rejectedData) {
-                return DragTarget<FileMeta>(
-                  onWillAcceptWithDetails: (details) => true,
-                  onAcceptWithDetails: (details) {
-                    onMoveFile?.call(details.data, null); // Move to top level
-                  },
-                  builder: (context, candidateData, rejectedData) {
-                    return ListView(
-                      padding: const EdgeInsets.only(top: 4, bottom: 4),
-                      children: [
-                        ...topLevelFiles.map((f) => _topFileTile(f)),
-                        ...folders.map((f) => _buildFolderTile(context, f)),
-                      ],
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-          const Divider(height: 24),
-          _UserSection(onSignOut: onSignOut, onUpgradePlan: onUpgradePlan),
-        ],
-      ],
-    ),
-  );
+      ),
+      child: _buildFileTileContent(context, f, isSelected, nested: false),
+    );
+  }
 
-  //──────────────────  Tiles  ──────────────────
+  Widget _fileTile(BuildContext context, FileMeta f, {bool nested = false}) {
+    final isSelected = selectedFileId == f.id;
+    return Draggable<FileMeta>(
+      data: f,
+      feedback: Opacity(
+        opacity: 0.3,
+        child: Material(
+          child: _buildFileTileContent(context, f, isSelected, nested: nested),
+        ),
+      ),
+      child: _buildFileTileContent(context, f, isSelected, nested: nested),
+    );
+  }
+
+  Widget _buildFileTileContent(
+    BuildContext context,
+    FileMeta f,
+    bool isSelected, {
+    bool nested = false,
+  }) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        decoration: BoxDecoration(
+          color: isSelected ? kBrand.withOpacity(0.10) : null,
+          border:
+              isSelected
+                  ? Border(left: BorderSide(color: kBrand, width: 4))
+                  : null,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        margin: nested ? const EdgeInsets.only(left: 8) : null,
+        child: ListTile(
+          leading: const Icon(Icons.insert_drive_file_outlined, size: 18),
+          title:
+              sidebarCollapsed
+                  ? null
+                  : Text(f.name, style: const TextStyle(fontSize: 13)),
+          trailing:
+              sidebarCollapsed
+                  ? null
+                  : IconButton(
+                    icon: const Icon(Icons.delete, size: 18, color: Colors.red),
+                    tooltip: 'Delete file',
+                    onPressed: () async {
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder:
+                            (ctx) => AlertDialog(
+                              title: const Text('Delete File'),
+                              content: const Text(
+                                'Are you sure you want to delete this file?',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.of(ctx).pop(false),
+                                  child: const Text('Cancel'),
+                                ),
+                                ElevatedButton(
+                                  onPressed: () => Navigator.of(ctx).pop(true),
+                                  child: const Text('Delete'),
+                                ),
+                              ],
+                            ),
+                      );
+                      if (confirm == true) {
+                        await onDeleteFile?.call(f);
+                      }
+                    },
+                  ),
+          tileColor: Colors.transparent,
+          hoverColor: Colors.grey[200],
+          selected: isSelected,
+          contentPadding: const EdgeInsets.only(left: 8, right: 4),
+          onTap: () {
+            onSelectAnyFile?.call(f);
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _buildFolderTile(BuildContext context, Folder folder) {
     final isCollapsed = collapsed.contains(folder.id);
     final isSelected = selectedFolderId == folder.id;
@@ -146,14 +164,10 @@ class FileGeniusSidebar extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Draggable folder with drop zone
         DragTarget<FileMeta>(
           onWillAcceptWithDetails: (details) => true,
           onAcceptWithDetails: (details) {
-            onMoveFile?.call(
-              details.data,
-              folder.id,
-            ); // Move file into this folder
+            onMoveFile?.call(details.data, folder.id);
           },
           builder: (context, candidateData, rejectedData) {
             return Draggable<String>(
@@ -185,6 +199,7 @@ class FileGeniusSidebar extends StatelessWidget {
               childWhenDragging: Opacity(
                 opacity: 0.3,
                 child: _buildFolderTileContent(
+                  context,
                   folder,
                   isCollapsed,
                   isSelected,
@@ -193,6 +208,7 @@ class FileGeniusSidebar extends StatelessWidget {
                 ),
               ),
               child: _buildFolderTileContent(
+                context,
                 folder,
                 isCollapsed,
                 isSelected,
@@ -206,7 +222,8 @@ class FileGeniusSidebar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(left: 24.0),
             child: Column(
-              children: kids.map((f) => _fileTile(f, nested: true)).toList(),
+              children:
+                  kids.map((f) => _fileTile(context, f, nested: true)).toList(),
             ),
           ),
       ],
@@ -214,6 +231,7 @@ class FileGeniusSidebar extends StatelessWidget {
   }
 
   Widget _buildFolderTileContent(
+    BuildContext context,
     Folder folder,
     bool isCollapsed,
     bool isSelected,
@@ -239,163 +257,231 @@ class FileGeniusSidebar extends StatelessWidget {
         ),
         child: ListTile(
           leading: Icon(Icons.folder, color: isSelected ? kBrand : Colors.blue),
-          title: Text(
-            folder.name,
-            style: TextStyle(
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-              color: isSelected ? kBrand : null,
-            ),
-          ),
-          trailing: IconButton(
-            icon: Icon(
-              isCollapsed
-                  ? Icons.keyboard_arrow_right
-                  : Icons.keyboard_arrow_down,
-              size: 22,
-              color: Colors.grey[700],
-            ),
-            tooltip: isCollapsed ? 'Expand' : 'Collapse',
-            onPressed: () => onToggleFolder(folder.id),
-            splashRadius: 18,
-          ),
-          tileColor: Colors.transparent,
-          hoverColor: Colors.grey[200],
-          selected: isSelected,
-          dense: true,
-          contentPadding: const EdgeInsets.only(left: 8, right: 4),
+          title:
+              sidebarCollapsed
+                  ? null
+                  : Text(
+                    folder.name,
+                    style: TextStyle(
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.normal,
+                      color: isSelected ? kBrand : null,
+                    ),
+                  ),
+          trailing:
+              sidebarCollapsed
+                  ? null
+                  : IconButton(
+                    icon: Icon(
+                      isCollapsed ? Icons.chevron_right : Icons.expand_more,
+                    ),
+                    onPressed: () => onToggleFolder(folder.id),
+                  ),
           onTap: () => onSelectFolder(folder.id),
-        ),
-      ),
-    );
-  }
-
-  Widget _fileTile(FileMeta f, {bool nested = false}) {
-    final isSelected = selectedFileId == f.id;
-    return Draggable<FileMeta>(
-      data: f,
-      feedback: Material(
-        elevation: 4,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            color: Colors.green.shade100,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.insert_drive_file_outlined,
-                color: Colors.green,
-                size: 18,
+          onLongPress: () {
+            // Show context menu
+            final RenderBox overlay =
+                Overlay.of(context).context.findRenderObject() as RenderBox;
+            showMenu(
+              context: context,
+              position: RelativeRect.fromRect(
+                (context.findRenderObject() as RenderBox).localToGlobal(
+                      Offset.zero,
+                      ancestor: overlay,
+                    ) &
+                    const Size(40, 40), // smaller rect, the touch area
+                Offset.zero & overlay.size,
               ),
-              const SizedBox(width: 8),
-              Text(
-                f.name,
-                style: const TextStyle(color: Colors.green, fontSize: 13),
-              ),
-            ],
-          ),
-        ),
-      ),
-      childWhenDragging: Opacity(
-        opacity: 0.3,
-        child: _buildFileTileContent(f, isSelected, nested: nested),
-      ),
-      child: _buildFileTileContent(f, isSelected, nested: nested),
-    );
-  }
-
-  Widget _buildFileTileContent(
-    FileMeta f,
-    bool isSelected, {
-    bool nested = false,
-  }) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        decoration: BoxDecoration(
-          color: isSelected ? kBrand.withOpacity(0.10) : null,
-          border:
-              isSelected
-                  ? Border(left: BorderSide(color: kBrand, width: 4))
-                  : null,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        margin: nested ? const EdgeInsets.only(left: 8) : null,
-        child: ListTile(
-          dense: true,
-          leading: const Icon(Icons.insert_drive_file_outlined, size: 18),
-          title: Text(f.name, style: const TextStyle(fontSize: 13)),
+              items: [
+                PopupMenuItem(
+                  value: 'rename',
+                  child: const Text('Rename'),
+                  onTap: () async {
+                    // Your rename logic here
+                    final ctl = TextEditingController(text: folder.name);
+                    final newName = await showDialog<String>(
+                      context: context,
+                      builder:
+                          (ctx) => AlertDialog(
+                            title: const Text('Rename Folder'),
+                            content: TextField(
+                              controller: ctl,
+                              autofocus: true,
+                            ),
+                            actions: [
+                              TextButton(
+                                child: const Text('Cancel'),
+                                onPressed: () => Navigator.of(ctx).pop(),
+                              ),
+                              TextButton(
+                                child: const Text('Rename'),
+                                onPressed:
+                                    () =>
+                                        Navigator.of(ctx).pop(ctl.text.trim()),
+                              ),
+                            ],
+                          ),
+                    );
+                    if (newName != null &&
+                        newName.isNotEmpty &&
+                        newName != folder.name) {
+                      await onRenameFolder?.call(folder, newName);
+                    }
+                  },
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: const Text('Delete'),
+                  onTap: () async {
+                    // Your delete logic here
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder:
+                          (ctx) => AlertDialog(
+                            title: const Text('Delete Folder'),
+                            content: const Text(
+                              'Are you sure you want to delete this folder and all its contents?',
+                            ),
+                            actions: [
+                              TextButton(
+                                child: const Text('Cancel'),
+                                onPressed: () => Navigator.of(ctx).pop(false),
+                              ),
+                              ElevatedButton(
+                                child: const Text('Delete'),
+                                onPressed: () => Navigator.of(ctx).pop(true),
+                              ),
+                            ],
+                          ),
+                    );
+                    if (confirm == true) {
+                      await onDeleteFolder?.call(folder);
+                    }
+                  },
+                ),
+              ],
+            );
+          },
           tileColor: Colors.transparent,
           hoverColor: Colors.grey[200],
           selected: isSelected,
+          dense: true,
           contentPadding: const EdgeInsets.only(left: 8, right: 4),
-          onTap: () {
-            onSelectAnyFile?.call(f);
-            onSelectTopFile?.call(f);
-          },
         ),
       ),
     );
   }
-
-  Widget _topFileTile(FileMeta f) => _fileTile(f, nested: false);
-}
-
-/*────────────────── cosmetics ──────────────────*/
-class _AppHeader extends StatelessWidget {
-  const _AppHeader({required this.onToggleSidebar, required this.collapsed});
-  final VoidCallback onToggleSidebar;
-  final bool collapsed;
 
   @override
-  Widget build(BuildContext ctx) {
-    if (collapsed) {
-      // Collapsed: only show icons, centered, no extra padding
-      return SizedBox(
-        height: 48,
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.book, color: kBrand, size: 24),
-            IconButton(
-              icon: const Icon(Icons.chevron_right),
-              tooltip: 'Expand sidebar',
-              onPressed: onToggleSidebar,
-              iconSize: 24,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      width: sidebarCollapsed ? 56 : kSidebarW,
+      color: Colors.grey.shade100,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Sidebar header
+          Padding(
+            padding: const EdgeInsets.all(8.0),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: Icon(sidebarCollapsed ? Icons.menu : Icons.close),
+                  onPressed: onToggleSidebar,
+                ),
+                if (!sidebarCollapsed)
+                  const Text(
+                    'FileGenius',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+              ],
             ),
-          ],
-        ),
-      );
-    } else {
-      // Expanded: show icon, text, and chevron
-      return Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            const Icon(Icons.book, color: kBrand, size: 28),
-            const SizedBox(width: 8),
-            Expanded(
+          ),
+          if (!sidebarCollapsed) ...[
+            _SidebarButton(
+              icon: Icons.dashboard,
+              label: 'Dashboard',
+              onTap: onDashboardTap,
+            ),
+            _SidebarButton(
+              icon: Icons.create_new_folder,
+              label: 'New Folder',
+              onTap: onCreateFolder,
+            ),
+            _SidebarButton(
+              icon: Icons.upload_file,
+              label: 'Upload File',
+              onTap: onUploadFile,
+            ),
+            // Clear All Files & Folders button
+            if (onClearData != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.delete_sweep, color: Colors.red),
+                  label: const Text('Clear All Files & Folders'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red.shade50,
+                    foregroundColor: Colors.red,
+                    minimumSize: const Size.fromHeight(36),
+                  ),
+                  onPressed: onClearData,
+                ),
+              ),
+            const SizedBox(height: 8),
+            const Divider(),
+            const Padding(
+              padding: EdgeInsets.only(left: 16, top: 8, bottom: 4),
               child: Text(
-                'FileGenius',
-                style: Theme.of(
-                  ctx,
-                ).textTheme.titleMedium!.copyWith(fontWeight: FontWeight.bold),
+                'FILES & FOLDERS',
+                style: TextStyle(
+                  color: Colors.grey,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                  fontSize: 13,
+                ),
               ),
             ),
-            IconButton(
-              icon: const Icon(Icons.chevron_left),
-              tooltip: 'Collapse sidebar',
-              onPressed: onToggleSidebar,
+            Expanded(
+              child: DragTarget<String>(
+                onWillAcceptWithDetails:
+                    (details) => details.data.startsWith('folder:'),
+                onAcceptWithDetails: (details) {
+                  final data = details.data;
+                  final folderId = data.substring(7); // Remove 'folder:' prefix
+                  final folderIndex = folders.indexWhere(
+                    (f) => f.id == folderId,
+                  );
+                  if (folderIndex != -1) {
+                    onMoveFolder?.call(folderId, 0); // Move to top
+                  }
+                },
+                builder: (context, candidateData, rejectedData) {
+                  return DragTarget<FileMeta>(
+                    onWillAcceptWithDetails: (details) => true,
+                    onAcceptWithDetails: (details) {
+                      onMoveFile?.call(details.data, null); // Move to top level
+                    },
+                    builder: (context, candidateData, rejectedData) {
+                      return ListView(
+                        padding: const EdgeInsets.only(top: 4, bottom: 4),
+                        children: [
+                          ...topLevelFiles.map((f) => _topFileTile(context, f)),
+                          ...folders.map((f) => _buildFolderTile(context, f)),
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
             ),
+            const Divider(height: 24),
+            _UserSection(onSignOut: onSignOut, onUpgradePlan: onUpgradePlan),
           ],
-        ),
-      );
-    }
+        ],
+      ),
+    );
   }
 }
 
@@ -532,6 +618,171 @@ class _UserSection extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class FileGeniusSidebarContainer extends StatefulWidget {
+  const FileGeniusSidebarContainer({super.key});
+
+  @override
+  State<FileGeniusSidebarContainer> createState() =>
+      _FileGeniusSidebarContainerState();
+}
+
+class _FileGeniusSidebarContainerState
+    extends State<FileGeniusSidebarContainer> {
+  List<Folder> folders = []; // Load from Firestore
+  List<FileMeta> topLevelFiles = []; // Load from Firestore
+  Map<String, List<FileMeta>> filesByFolder = {}; // Load from Firestore
+  Set<String> collapsed = {};
+  String? selectedFolderId;
+  String? selectedFileId;
+
+  // Clear all files and folders
+  void _handleClearData() async {
+    // Delete all files from Firestore
+    final filesSnapshot =
+        await FirebaseFirestore.instance.collection('files').get();
+    for (var doc in filesSnapshot.docs) {
+      // Delete file from Firestore
+      await doc.reference.delete();
+      // Delete file from Storage (if you store file URLs/paths in Firestore)
+      final fileUrl = doc.data()['url'];
+      if (fileUrl != null) {
+        final ref = FirebaseStorage.instance.refFromURL(fileUrl);
+        await ref.delete();
+      }
+    }
+
+    // Delete all folders from Firestore
+    final foldersSnapshot =
+        await FirebaseFirestore.instance.collection('folders').get();
+    for (var doc in foldersSnapshot.docs) {
+      await doc.reference.delete();
+    }
+
+    // Clear local state and rebuild UI
+    setState(() {
+      folders.clear();
+      topLevelFiles.clear();
+      filesByFolder.clear();
+      selectedFolderId = null;
+      selectedFileId = null;
+    });
+  }
+
+  // Rename a folder
+  Future<void> _handleRenameFolder(Folder folder, String newName) async {
+    // Update folder name in Firestore
+    await FirebaseFirestore.instance
+        .collection('folders')
+        .doc(folder.id)
+        .update({'name': newName});
+    // Update local state
+    setState(() {
+      final idx = folders.indexWhere((f) => f.id == folder.id);
+      if (idx != -1) {
+        folders[idx] = Folder(id: folder.id, name: newName);
+      }
+    });
+  }
+
+  // Delete a folder and all its related subcollections
+  Future<void> _handleDeleteFolder(Folder folder) async {
+    // Delete all files in this folder from Firestore and Storage
+    final files = filesByFolder[folder.id] ?? [];
+    for (var file in files) {
+      await FirebaseFirestore.instance
+          .collection('files')
+          .doc(file.id)
+          .delete();
+      if (file.url.isNotEmpty) {
+        try {
+          final ref = FirebaseStorage.instance.refFromURL(file.url);
+          await ref.delete();
+        } catch (e) {
+          print('Error deleting from storage: $e');
+        }
+      }
+    }
+    // Delete folder document
+    await FirebaseFirestore.instance
+        .collection('folders')
+        .doc(folder.id)
+        .delete();
+    // Update local state
+    setState(() {
+      folders.removeWhere((f) => f.id == folder.id);
+      filesByFolder.remove(folder.id);
+      if (selectedFolderId == folder.id) selectedFolderId = null;
+    });
+  }
+
+  // Delete a top-level file and its subcollections
+  Future<void> _handleDeleteFile(FileMeta file) async {
+    await FirebaseFirestore.instance.collection('files').doc(file.id).delete();
+    if (file.url.isNotEmpty) {
+      try {
+        final ref = FirebaseStorage.instance.refFromURL(file.url);
+        await ref.delete();
+      } catch (e) {
+        print('Error deleting from storage: $e');
+      }
+    }
+    setState(() {
+      topLevelFiles.removeWhere((f) => f.id == file.id);
+      filesByFolder.forEach((k, v) => v.removeWhere((f) => f.id == file.id));
+      if (selectedFileId == file.id) selectedFileId = null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FileGeniusSidebar(
+      folders: folders,
+      topLevelFiles: topLevelFiles,
+      filesByFolder: filesByFolder,
+      selectedFolderId: selectedFolderId,
+      collapsed: collapsed,
+      onDashboardTap: () {},
+      onCreateFolder: () {},
+      onUploadFile: () {},
+      onToggleFolder: (folderId) {
+        setState(() {
+          /* ... */
+        });
+      },
+      onSelectFolder: (folderId) {
+        setState(() {
+          selectedFolderId = folderId;
+        });
+      },
+      onSelectTopFile: (file) {
+        setState(() {
+          selectedFileId = file.id;
+        });
+      },
+      onSelectAnyFile: (file) {
+        setState(() {
+          selectedFileId = file.id;
+        });
+      },
+      onSignOut: () {},
+      onUpgradePlan: () {},
+      sidebarCollapsed: false,
+      onToggleSidebar: () {},
+      selectedFileId: selectedFileId,
+      onMoveFile: (file, folderId) {
+        /* implement move logic */
+      },
+      onMoveFolder: (folderId, newIndex) {
+        /* implement move logic */
+      },
+      onClearData: _handleClearData,
+      onDeleteFolder: _handleDeleteFolder,
+      onRenameFolder: _handleRenameFolder,
+      onDeleteFile: _handleDeleteFile,
     );
   }
 }

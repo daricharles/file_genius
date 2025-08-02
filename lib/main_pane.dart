@@ -14,6 +14,8 @@
 // NOTE:  This file only focuses on layout + state‑aware rendering.
 //        Drag‑and‑drop UI itself lives in `drag_drop_zone.dart`.
 
+// ignore_for_file: deprecated_member_use
+
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 
@@ -206,6 +208,7 @@ class MainPane extends StatelessWidget {
                   : ListView.separated(
                     padding: const EdgeInsets.all(16),
                     itemCount: files.length,
+                    // ignore: unnecessary_underscores
                     separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final file = files[index];

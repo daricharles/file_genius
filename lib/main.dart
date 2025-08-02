@@ -237,6 +237,10 @@ class _HomeScreenState extends State<HomeScreen> {
         selectedFileId: _previewFile?.id,
         onMoveFile: _moveFile,
         onMoveFolder: _moveFolder,
+        onClearData: _handleClearData,
+        onDeleteFolder: _handleDeleteFolder,
+        onRenameFolder: _handleRenameFolder,
+        onDeleteFile: _handleDeleteFile,
       );
 
       /* Main content area */
@@ -250,58 +254,7 @@ class _HomeScreenState extends State<HomeScreen> {
           onOpenUrl: _openUrl,
           previewFile: _previewFile,
           onSelectFile: (file) => setState(() => _previewFile = file),
-          onDeleteFile: (file) async {
-            final confirmed = await showDialog<bool>(
-              context: context,
-              builder:
-                  (ctx) => AlertDialog(
-                    title: const Text('Delete File'),
-                    content: Text(
-                      'Are you sure you want to delete "${file.name}"? This action cannot be undone.',
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.of(ctx).pop(false),
-                        child: const Text('Cancel'),
-                      ),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                        ),
-                        onPressed: () => Navigator.of(ctx).pop(true),
-                        child: const Text('Delete'),
-                      ),
-                    ],
-                  ),
-            );
-            if (confirmed != true) return;
-            final uid = FirebaseAuth.instance.currentUser!.uid;
-            String storagePath;
-            DocumentReference docRef;
-            if (file.folderId == null) {
-              // Top-level file
-              storagePath = 'users/$uid/files/${file.name}';
-              docRef = FirebaseFirestore.instance.doc(
-                'users/$uid/files/${file.id}',
-              );
-            } else {
-              // File in folder
-              storagePath = 'users/$uid/folders/${file.folderId}/${file.name}';
-              docRef = FirebaseFirestore.instance.doc(
-                'users/$uid/folders/${file.folderId}/files/${file.id}',
-              );
-            }
-            try {
-              await FirebaseStorage.instance.ref(storagePath).delete();
-              await docRef.delete();
-              if (mounted) {
-                setState(() => _previewFile = null);
-                _snack('File deleted');
-              }
-            } catch (e) {
-              _snack('Failed to delete file: $e', err: true);
-            }
-          },
+          onDeleteFile: _handleDeleteFile,
         );
       } else if (_selectedFolder != null) {
         content = MainPane(
@@ -312,62 +265,7 @@ class _HomeScreenState extends State<HomeScreen> {
           onOpenUrl: _openUrl,
           previewFile: _previewFile,
           onSelectFile: (file) => setState(() => _previewFile = file),
-          onDeleteFile:
-              _previewFile != null
-                  ? (file) async {
-                    final confirmed = await showDialog<bool>(
-                      context: context,
-                      builder:
-                          (ctx) => AlertDialog(
-                            title: const Text('Delete File'),
-                            content: Text(
-                              'Are you sure you want to delete "${file.name}"? This action cannot be undone.',
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.of(ctx).pop(false),
-                                child: const Text('Cancel'),
-                              ),
-                              ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red,
-                                ),
-                                onPressed: () => Navigator.of(ctx).pop(true),
-                                child: const Text('Delete'),
-                              ),
-                            ],
-                          ),
-                    );
-                    if (confirmed != true) return;
-                    final uid = FirebaseAuth.instance.currentUser!.uid;
-                    String storagePath;
-                    DocumentReference docRef;
-                    if (file.folderId == null) {
-                      // Top-level file
-                      storagePath = 'users/$uid/files/${file.name}';
-                      docRef = FirebaseFirestore.instance.doc(
-                        'users/$uid/files/${file.id}',
-                      );
-                    } else {
-                      // File in folder
-                      storagePath =
-                          'users/$uid/folders/${file.folderId}/${file.name}';
-                      docRef = FirebaseFirestore.instance.doc(
-                        'users/$uid/folders/${file.folderId}/files/${file.id}',
-                      );
-                    }
-                    try {
-                      await FirebaseStorage.instance.ref(storagePath).delete();
-                      await docRef.delete();
-                      if (mounted) {
-                        setState(() => _previewFile = null);
-                        _snack('File deleted');
-                      }
-                    } catch (e) {
-                      _snack('Failed to delete file: $e', err: true);
-                    }
-                  }
-                  : null,
+          onDeleteFile: _handleDeleteFile,
         );
       } else {
         // Show welcome/upload screen (no folder or file selected)
@@ -379,7 +277,7 @@ class _HomeScreenState extends State<HomeScreen> {
           onOpenUrl: _openUrl,
           previewFile: null,
           onSelectFile: (file) => setState(() => _previewFile = file),
-          onDeleteFile: null,
+          onDeleteFile: _handleDeleteFile,
         );
       }
 
@@ -556,6 +454,215 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /* ── data deletion & modification ─────────────────────────── */
+
+  // These are the public-facing methods that include dialogs.
+  // They call the private "_" methods to do the actual work.
+
+  Future<void> _handleDeleteFile(FileMeta file) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('Delete File'),
+            content: Text(
+              'Are you sure you want to delete "${file.name}"? This action cannot be undone.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+    );
+    if (confirmed == true) {
+      await _deleteFile(file);
+    }
+  }
+
+  Future<void> _handleDeleteFolder(Folder folder) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('Delete Folder'),
+            content: Text(
+              'Are you sure you want to delete "${folder.name}" and all its contents? This cannot be undone.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Delete'),
+              ),
+            ],
+          ),
+    );
+    if (confirmed == true) {
+      await _deleteFolder(folder);
+    }
+  }
+
+  Future<void> _handleRenameFolder(Folder folder, String newName) async {
+    final cleanName = newName.trim();
+    if (cleanName.isEmpty || cleanName == folder.name) return;
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    try {
+      await FirebaseFirestore.instance
+          .doc('users/$uid/folders/${folder.id}')
+          .update({'name': cleanName});
+      _snack('Folder renamed to "$cleanName"');
+    } catch (e) {
+      _snack('Error renaming folder: $e', err: true);
+    }
+  }
+
+  void _handleClearData() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('Clear All Data'),
+            content: const Text(
+              'Are you sure you want to delete ALL files and folders? This action is permanent and cannot be undone.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('DELETE EVERYTHING'),
+              ),
+            ],
+          ),
+    );
+    if (confirmed == true) {
+      await _performClearAllData();
+    }
+  }
+
+  // --- Private Worker Methods ---
+
+  Future<void> _deleteFile(FileMeta file, {bool showSnack = true}) async {
+    if (!mounted) return;
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    final storagePath =
+        file.folderId == null
+            ? 'users/$uid/files/${file.name}'
+            : 'users/$uid/folders/${file.folderId}/${file.name}';
+    final docRef =
+        file.folderId == null
+            ? FirebaseFirestore.instance.doc('users/$uid/files/${file.id}')
+            : FirebaseFirestore.instance.doc(
+              'users/$uid/folders/${file.folderId}/files/${file.id}',
+            );
+
+    try {
+      try {
+        await FirebaseStorage.instance.ref(storagePath).delete();
+      } catch (e) {
+        debugPrint('Storage deletion failed (might be okay): $e');
+      }
+      await docRef.delete();
+      if (mounted) {
+        if (_previewFile?.id == file.id) {
+          setState(() => _previewFile = null);
+        }
+        if (showSnack) _snack('File "${file.name}" deleted.');
+      }
+    } catch (e) {
+      if (showSnack) _snack('Error deleting file: $e', err: true);
+    }
+  }
+
+  Future<void> _deleteFolder(Folder folder, {bool showSnack = true}) async {
+    if (!mounted) return;
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    final folderRef = FirebaseFirestore.instance.doc(
+      'users/$uid/folders/${folder.id}',
+    );
+
+    try {
+      final filesSnapshot = await folderRef.collection('files').get();
+      for (final doc in filesSnapshot.docs) {
+        final file = FileMeta.fromDoc(doc);
+        try {
+          final storagePath = 'users/$uid/folders/${folder.id}/${file.name}';
+          await FirebaseStorage.instance.ref(storagePath).delete();
+        } catch (e) {
+          debugPrint('Storage deletion failed for ${file.name}: $e');
+        }
+        await doc.reference.delete();
+      }
+
+      await folderRef.delete();
+
+      if (mounted) {
+        if (_selectedFolder?.id == folder.id) {
+          setState(() {
+            _selectedFolder = null;
+            _previewFile = null;
+          });
+        }
+        if (showSnack) _snack('Folder "${folder.name}" deleted.');
+      }
+    } catch (e) {
+      if (showSnack) _snack('Error deleting folder: $e', err: true);
+    }
+  }
+
+  Future<void> _performClearAllData() async {
+    if (!mounted) return;
+    _snack('Clearing all data...');
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+
+    try {
+      // 1. Get all folders
+      final foldersSnapshot =
+          await FirebaseFirestore.instance
+              .collection('users/$uid/folders')
+              .get();
+
+      // 2. Delete each folder and its contents
+      for (final folderDoc in foldersSnapshot.docs) {
+        await _deleteFolder(Folder.fromDoc(folderDoc), showSnack: false);
+      }
+
+      // 3. Get all top-level files
+      final topLevelFilesSnapshot =
+          await FirebaseFirestore.instance.collection('users/$uid/files').get();
+
+      // 4. Delete each top-level file
+      for (final fileDoc in topLevelFilesSnapshot.docs) {
+        await _deleteFile(FileMeta.fromDoc(fileDoc), showSnack: false);
+      }
+
+      if (mounted) {
+        // The streams will handle clearing the lists, but we should clear selections.
+        setState(() {
+          _selectedFolder = null;
+          _previewFile = null;
+        });
+        _snack('All files and folders have been cleared.');
+      }
+    } catch (e) {
+      _snack('An error occurred while clearing data: $e', err: true);
+    }
+  }
+
   /* ── misc helpers ─────────────────────────────────────────── */
   Future<void> _openUrl(String url) async {
     final uri = Uri.parse(url);
@@ -575,57 +682,98 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /* ── drag & drop operations ─────────────────────────────── */
   Future<void> _moveFile(FileMeta file, String? targetFolderId) async {
+    // Prevent moving a file to its current location
+    if (file.folderId == targetFolderId) return;
+
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    final batch = FirebaseFirestore.instance.batch();
+
     try {
-      final uid = FirebaseAuth.instance.currentUser!.uid;
-
-      // Update Firestore document
-      DocumentReference docRef;
-      if (file.folderId == null) {
-        // Moving from top level
-        docRef = FirebaseFirestore.instance.doc('users/$uid/files/${file.id}');
-      } else {
-        // Moving from a folder
-        docRef = FirebaseFirestore.instance.doc(
-          'users/$uid/folders/${file.folderId}/files/${file.id}',
-        );
-      }
-
-      await docRef.update({'folderId': targetFolderId});
-
-      // Move file in Firebase Storage
-      final oldPath =
+      // 1. Define old and new paths for Storage and Firestore
+      final oldStoragePath =
           file.folderId == null
               ? 'users/$uid/files/${file.name}'
               : 'users/$uid/folders/${file.folderId}/${file.name}';
-
-      final newPath =
+      final newStoragePath =
           targetFolderId == null
               ? 'users/$uid/files/${file.name}'
               : 'users/$uid/folders/$targetFolderId/${file.name}';
 
-      if (oldPath != newPath) {
-        final oldRef = FirebaseStorage.instance.ref(oldPath);
-        final newRef = FirebaseStorage.instance.ref(newPath);
+      final oldDocRef =
+          file.folderId == null
+              ? FirebaseFirestore.instance.doc('users/$uid/files/${file.id}')
+              : FirebaseFirestore.instance.doc(
+                'users/$uid/folders/${file.folderId}/files/${file.id}',
+              );
 
-        // Copy to new location
-        final fileData = await oldRef.getData();
-        if (fileData != null) {
-          await newRef.putData(fileData);
-        } else {
-          throw Exception('Failed to read file data');
-        }
+      // The new document will have a new ID
+      final newDocRef =
+          targetFolderId == null
+              ? FirebaseFirestore.instance.collection('users/$uid/files').doc()
+              : FirebaseFirestore.instance
+                  .collection('users/$uid/folders/$targetFolderId/files')
+                  .doc();
 
-        // Delete from old location
-        await oldRef.delete();
-
-        // Update URL in Firestore
-        final newUrl = await newRef.getDownloadURL();
-        await docRef.update({'url': newUrl});
+      // 2. Copy file in Firebase Storage if its path changes
+      String newUrl;
+      if (oldStoragePath != newStoragePath) {
+        final oldStorageRef = FirebaseStorage.instance.ref(oldStoragePath);
+        final newStorageRef = FirebaseStorage.instance.ref(newStoragePath);
+        final data = await oldStorageRef.getData();
+        if (data == null) throw Exception('Could not read original file data.');
+        await newStorageRef.putData(data);
+        newUrl = await newStorageRef.getDownloadURL();
+      } else {
+        newUrl = file.url; // URL doesn't change if path is the same
       }
 
-      _snack('File moved successfully');
+      // 3. Create new Firestore document in a batch
+      final newFileData = {
+        'name': file.name,
+        'size': file.size,
+        'type': file.type,
+        'url': newUrl,
+        'uploadedAt': Timestamp.fromDate(
+          file.uploadedAt,
+        ), // Use original upload date
+        'folderId': targetFolderId,
+      };
+      batch.set(newDocRef, newFileData);
+
+      // 4. Delete old Firestore document in a batch
+      batch.delete(oldDocRef);
+
+      // 5. Commit Firestore changes
+      await batch.commit();
+
+      // 6. Delete old file from Storage (after Firestore is updated)
+      if (oldStoragePath != newStoragePath) {
+        await FirebaseStorage.instance.ref(oldStoragePath).delete();
+      }
+
+      _snack('File moved successfully.');
+
+      // The UI will update via streams. We can clear the selection
+      // or try to find the new file and select it. For now, just clear.
+      if (mounted) {
+        setState(() {
+          _previewFile = null;
+          // Optionally, select the folder the file was moved to
+          if (targetFolderId != null) {
+            final matchingFolders = _folders.where(
+              (f) => f.id == targetFolderId,
+            );
+            _selectedFolder =
+                matchingFolders.isNotEmpty ? matchingFolders.first : null;
+          } else {
+            _selectedFolder = null;
+          }
+        });
+      }
     } catch (e) {
       _snack('Failed to move file: $e', err: true);
+      // In a real app, you might want rollback logic here.
+      // e.g., if Firestore commit fails, delete the copied storage file.
     }
   }
 

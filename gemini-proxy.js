@@ -2,6 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
 const fileUpload = require('express-fileupload');
+require('dotenv').config();
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 const XLSX = require('xlsx');
@@ -12,7 +13,13 @@ app.use(cors());
 app.use(express.json());
 app.use(fileUpload());
 
-const GEMINI_API_KEY = 'AIzaSyBAHxBGsAXmkffc1MPpirFF2dh-sVVnc4U';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+if (!GEMINI_API_KEY) {
+  // This will stop the server on startup if the key is not found.
+  // You need to create a `.env` file in the `file_genius` directory
+  // with the line: GEMINI_API_KEY='YourActualApiKeyHere'
+  throw new Error('GEMINI_API_KEY is not set in the environment variables.');
+}
 const pptx2json = require('pptx2json');
 const officeparser = require('officeparser');
 
@@ -30,29 +37,40 @@ app.post('/gemini', async (req, res) => {
 
 // PDF text extraction endpoint
 app.post('/extract-pdf-text', async (req, res) => {
+  const { url } = req.body;
+  if (!url) {
+    return res.status(400).send('URL is required');
+  }
+
   try {
-    if (req.files && req.files.pdf) {
-      // PDF uploaded as file
-      const pdfBuffer = req.files.pdf.data;
-      const data = await pdfParse(pdfBuffer);
-      res.json({ text: data.text });
-    } else if (req.body.url) {
-      // PDF provided as URL
-      const response = await axios.get(req.body.url, { responseType: 'arraybuffer' });
-      const data = await pdfParse(response.data);
-      res.json({ text: data.text });
-    } else {
-      res.status(400).json({ error: 'No PDF file or URL provided.' });
+    const response = await axios.get(url, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(response.data, 'binary');
+    
+    try {
+      const text = await officeparser.parseOfficeAsync(buffer);
+      res.send(text);
+    } catch (parseError) {
+      console.error('Error parsing file:', parseError);
+      res.status(400).send(`Failed to parse file. It might be corrupted or in an unsupported format. Parser error: ${parseError.message}`);
     }
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+
+  } catch (error) {
+    console.error('Error fetching or processing file:', error);
+    res.status(500).send('Error fetching file from URL.');
   }
 });
 
 // Helper to download a file to a temp location
 async function downloadToTemp(url, ext) {
+  // Validate the URL before proceeding
+  if (!url?.startsWith('http')) {
+    console.error(`[Proxy] Invalid URL for download: ${url}`);
+    // Return a path to a dummy file or throw an error
+    // For now, we'll throw to indicate failure clearly
+    throw new Error(`Invalid URL provided for download: ${url}`);
+  }
+  const tempPath = path.join(__dirname, `temp_file_${Date.now()}.${ext}`);
   const response = await axios.get(url, { responseType: 'arraybuffer' });
-  const tempPath = path.join(__dirname, `tmp_${Date.now()}.${ext}`);
   fs.writeFileSync(tempPath, response.data);
   return tempPath;
 }
@@ -141,4 +159,4 @@ app.post('/extract-xlsx-text', async (req, res) => {
   }
 });
 
-app.listen(3000, () => console.log('Proxy running on http://localhost:3000')); 
+app.listen(3000, () => console.log('Proxy running on http://localhost:3000'));
