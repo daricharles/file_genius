@@ -31,6 +31,149 @@ import 'main_pane.dart';
 import 'models.dart';
 import 'dash_board.dart';
 
+/// Achievement notification dialog with animations
+class AchievementDialog extends StatefulWidget {
+  final String title;
+  final IconData icon;
+  final int points;
+
+  const AchievementDialog({
+    super.key,
+    required this.title,
+    required this.icon,
+    required this.points,
+  });
+
+  @override
+  State<AchievementDialog> createState() => _AchievementDialogState();
+}
+
+class _AchievementDialogState extends State<AchievementDialog>
+    with TickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _rotationAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+    _scaleAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.elasticOut));
+    _rotationAnimation = Tween<double>(
+      begin: 0.0,
+      end: 0.1,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    _controller.forward();
+
+    // Auto-dismiss after 3 seconds
+    Timer(const Duration(seconds: 3), () {
+      if (mounted) Navigator.of(context).pop();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          return Transform.scale(
+            scale: _scaleAnimation.value,
+            child: Transform.rotate(
+              angle: _rotationAnimation.value,
+              child: Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [kBrand.withValues(alpha: 0.9), kBrand],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: kBrand.withValues(alpha: 0.3),
+                      blurRadius: 20,
+                      spreadRadius: 5,
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(widget.icon, size: 64, color: Colors.white),
+                    const SizedBox(height: 16),
+                    Text(
+                      '🎉 Achievement Unlocked! 🎉',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      widget.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.stars,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${widget.points} Total Points',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 /// Safely writes data to Firestore and logs the result.
 Future<void> _safeSet(DocumentReference ref, Map<String, dynamic> data) async {
   try {
@@ -113,6 +256,15 @@ class _HomeScreenState extends State<HomeScreen> {
   int _correctAnswers = 0;
   int _loginDays = 0;
   DateTime? _lastLoginDate;
+
+  // Enhanced Analytics for Phase 2
+  int _totalPoints = 0;
+  int _weeklyUploads = 0;
+  int _monthlyUploads = 0;
+  Map<String, int> _fileTypeStats = {};
+  Map<String, int> _dailyActivity = {};
+  List<String> _unlockedBadges = [];
+  List<String> _recentAchievements = [];
 
   /* ── life‑cycle ───────────────────────────────────────────── */
   @override
@@ -216,13 +368,33 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _clearPreview() => setState(() => _previewFile = null);
 
+  /* ── AI and Quiz Interaction Methods ──────────────────────── */
+  void _handleAiInteraction() {
+    _incrementAiChatInteraction();
+    // This method can be called when user interacts with AI features
+    _snack('AI interaction recorded! +5 points');
+  }
+
+  void _handleQuizAnswer(bool isCorrect) {
+    _incrementQuestionAnswered(isCorrect);
+    final pointsText = isCorrect ? '+15 points' : '+2 points';
+    final message =
+        isCorrect
+            ? 'Correct answer! $pointsText'
+            : 'Good try! $pointsText for attempting';
+    _snack(message);
+  }
+
   /* ── Badge Progress Tracking ──────────────────────────────── */
   Future<void> _loadBadgeProgress() async {
     final uid = FirebaseAuth.instance.currentUser!.uid;
     try {
       final doc =
           await FirebaseFirestore.instance
-              .doc('users/$uid/badge_progress')
+              .collection('users')
+              .doc(uid)
+              .collection('settings')
+              .doc('badge_progress')
               .get();
 
       if (doc.exists && mounted) {
@@ -233,6 +405,15 @@ class _HomeScreenState extends State<HomeScreen> {
           _questionsAnswered = data['questionsAnswered'] ?? 0;
           _correctAnswers = data['correctAnswers'] ?? 0;
           _loginDays = data['loginDays'] ?? 0;
+          _totalPoints = data['totalPoints'] ?? 0;
+          _weeklyUploads = data['weeklyUploads'] ?? 0;
+          _monthlyUploads = data['monthlyUploads'] ?? 0;
+          _fileTypeStats = Map<String, int>.from(data['fileTypeStats'] ?? {});
+          _dailyActivity = Map<String, int>.from(data['dailyActivity'] ?? {});
+          _unlockedBadges = List<String>.from(data['unlockedBadges'] ?? []);
+          _recentAchievements = List<String>.from(
+            data['recentAchievements'] ?? [],
+          );
           if (data['lastLoginDate'] != null) {
             _lastLoginDate = (data['lastLoginDate'] as Timestamp).toDate();
           }
@@ -247,7 +428,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final uid = FirebaseAuth.instance.currentUser!.uid;
     try {
       await FirebaseFirestore.instance
-          .doc('users/$uid/badge_progress')
+          .collection('users')
+          .doc(uid)
+          .collection('settings')
+          .doc('badge_progress')
           .set(updates, SetOptions(merge: true));
     } catch (e) {
       debugPrint('Failed to update badge progress: $e');
@@ -305,7 +489,18 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _filesUploaded++;
     });
+
+    // Track file type statistics
+    final today = DateTime.now().toString().substring(0, 10);
+    setState(() {
+      _dailyActivity[today] = (_dailyActivity[today] ?? 0) + 1;
+      _weeklyUploads++;
+      _monthlyUploads++;
+    });
+
     _updateBadgeProgress({'filesUploaded': _filesUploaded});
+    _calculatePoints('file_upload');
+    _checkForNewAchievements();
   }
 
   void _incrementAiChatInteraction() {
@@ -313,6 +508,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _aiChatInteractions++;
     });
     _updateBadgeProgress({'aiChatInteractions': _aiChatInteractions});
+    _calculatePoints('ai_chat');
+    _checkForNewAchievements();
   }
 
   void _incrementQuestionAnswered(bool isCorrect) {
@@ -326,6 +523,107 @@ class _HomeScreenState extends State<HomeScreen> {
       'questionsAnswered': _questionsAnswered,
       'correctAnswers': _correctAnswers,
     });
+    _calculatePoints(isCorrect ? 'correct_answer' : 'answer_attempt');
+    _checkForNewAchievements();
+  }
+
+  /* ── Points & Achievements System ─────────────────────────── */
+  void _calculatePoints(String action) {
+    int points = 0;
+    switch (action) {
+      case 'file_upload':
+        points = 10;
+        break;
+      case 'ai_chat':
+        points = 5;
+        break;
+      case 'correct_answer':
+        points = 15;
+        break;
+      case 'answer_attempt':
+        points = 2;
+        break;
+      case 'daily_login':
+        points = 5;
+        break;
+      case 'streak_bonus':
+        points = _loginDays * 2; // Bonus points for streaks
+        break;
+    }
+
+    setState(() {
+      _totalPoints += points;
+    });
+
+    _updateBadgeProgress({'totalPoints': _totalPoints});
+  }
+
+  void _checkForNewAchievements() {
+    List<String> newAchievements = [];
+
+    // File upload achievements
+    if (_filesUploaded == 1 && !_unlockedBadges.contains('first_file')) {
+      newAchievements.add('first_file');
+      _showAchievementNotification('First File Uploaded!', Icons.upload_file);
+    }
+    if (_filesUploaded == 10 && !_unlockedBadges.contains('file_master')) {
+      newAchievements.add('file_master');
+      _showAchievementNotification('File Master!', Icons.folder);
+    }
+    if (_filesUploaded == 50 && !_unlockedBadges.contains('file_expert')) {
+      newAchievements.add('file_expert');
+      _showAchievementNotification('File Expert!', Icons.workspace_premium);
+    }
+
+    // Login streak achievements
+    if (_loginDays == 7 && !_unlockedBadges.contains('week_warrior')) {
+      newAchievements.add('week_warrior');
+      _showAchievementNotification('Week Warrior!', Icons.emoji_events);
+    }
+    if (_loginDays == 30 && !_unlockedBadges.contains('month_master')) {
+      newAchievements.add('month_master');
+      _showAchievementNotification('Month Master!', Icons.stars);
+    }
+
+    // Points achievements
+    if (_totalPoints >= 100 && !_unlockedBadges.contains('century_club')) {
+      newAchievements.add('century_club');
+      _showAchievementNotification('Century Club!', Icons.military_tech);
+    }
+    if (_totalPoints >= 500 && !_unlockedBadges.contains('point_prodigy')) {
+      newAchievements.add('point_prodigy');
+      _showAchievementNotification('Point Prodigy!', Icons.diamond);
+    }
+
+    if (newAchievements.isNotEmpty) {
+      setState(() {
+        _unlockedBadges.addAll(newAchievements);
+        _recentAchievements.addAll(newAchievements);
+        // Keep only last 5 recent achievements
+        if (_recentAchievements.length > 5) {
+          _recentAchievements = _recentAchievements.sublist(
+            _recentAchievements.length - 5,
+          );
+        }
+      });
+
+      _updateBadgeProgress({
+        'unlockedBadges': _unlockedBadges,
+        'recentAchievements': _recentAchievements,
+      });
+    }
+  }
+
+  void _showAchievementNotification(String title, IconData icon) {
+    if (!mounted) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (context) =>
+              AchievementDialog(title: title, icon: icon, points: _totalPoints),
+    );
   }
 
   /* ── UI build ─────────────────────────────────────────────── */
@@ -367,7 +665,10 @@ class _HomeScreenState extends State<HomeScreen> {
               _previewFile = file;
               _showDashboard = false;
             }),
-        onSignOut: () async => FirebaseAuth.instance.signOut(),
+        onSignOut: () async {
+          _clearPreview(); // Clear preview on sign out
+          await FirebaseAuth.instance.signOut();
+        },
         onUpgradePlan: () => _snack('Upgrade plan (todo)'),
         sidebarCollapsed: _sidebarCollapsed,
         onToggleSidebar:
@@ -390,6 +691,13 @@ class _HomeScreenState extends State<HomeScreen> {
           questionsAnswered: _questionsAnswered,
           correctAnswers: _correctAnswers,
           loginDays: _loginDays,
+          totalPoints: _totalPoints,
+          weeklyUploads: _weeklyUploads,
+          monthlyUploads: _monthlyUploads,
+          fileTypeStats: _fileTypeStats,
+          dailyActivity: _dailyActivity,
+          unlockedBadges: _unlockedBadges,
+          recentAchievements: _recentAchievements,
         );
       } else if (_previewFile != null) {
         content = MainPane(
@@ -441,6 +749,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         Expanded(child: content),
                       ],
                     ),
+            floatingActionButton: _showDashboard ? null : _buildDemoButtons(),
           ),
           // Loading overlay
           if (_isLoading || _isUploading)
@@ -482,6 +791,38 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     },
   );
+
+  /* ── Demo Feature Buttons ────────────────────────────────── */
+  Widget _buildDemoButtons() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        FloatingActionButton.extended(
+          heroTag: "ai_demo",
+          onPressed: _handleAiInteraction,
+          backgroundColor: Colors.purple,
+          icon: const Icon(Icons.smart_toy),
+          label: const Text('AI Chat'),
+        ),
+        const SizedBox(height: 10),
+        FloatingActionButton.extended(
+          heroTag: "quiz_correct",
+          onPressed: () => _handleQuizAnswer(true),
+          backgroundColor: Colors.green,
+          icon: const Icon(Icons.check),
+          label: const Text('Correct'),
+        ),
+        const SizedBox(height: 10),
+        FloatingActionButton.extended(
+          heroTag: "quiz_wrong",
+          onPressed: () => _handleQuizAnswer(false),
+          backgroundColor: Colors.orange,
+          icon: const Icon(Icons.close),
+          label: const Text('Wrong'),
+        ),
+      ],
+    );
+  }
 
   /* ── folder creation dialog ───────────────────────────────── */
   void _createFolderDialog() {
@@ -623,7 +964,7 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     }
 
-    _snack('${completed} file(s) uploaded successfully');
+    _snack('$completed file(s) uploaded successfully');
   }
 
   Future<FileMeta> _uploadOne({
