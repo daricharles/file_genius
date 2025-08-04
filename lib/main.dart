@@ -29,6 +29,7 @@ import 'login_page.dart';
 import 'side_bar.dart';
 import 'main_pane.dart';
 import 'models.dart';
+import 'dash_board.dart';
 
 /// Safely writes data to Firestore and logs the result.
 Future<void> _safeSet(DocumentReference ref, Map<String, dynamic> data) async {
@@ -99,12 +100,27 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription? _foldersSubscription;
   StreamSubscription? _topLevelFilesSubscription;
   bool _sidebarCollapsed = false;
+  bool _showDashboard = false;
+  bool _isLoading = false;
+  bool _isUploading = false;
+  double _uploadProgress = 0.0;
+  String _loadingMessage = '';
+
+  // Badge tracking
+  int _filesUploaded = 0;
+  int _aiChatInteractions = 0;
+  int _questionsAnswered = 0;
+  int _correctAnswers = 0;
+  int _loginDays = 0;
+  DateTime? _lastLoginDate;
 
   /* ── life‑cycle ───────────────────────────────────────────── */
   @override
   void initState() {
     super.initState();
     _attachFirestoreStreams();
+    _loadBadgeProgress();
+    _trackLoginDay();
   }
 
   @override
@@ -200,6 +216,118 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _clearPreview() => setState(() => _previewFile = null);
 
+  /* ── Badge Progress Tracking ──────────────────────────────── */
+  Future<void> _loadBadgeProgress() async {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    try {
+      final doc =
+          await FirebaseFirestore.instance
+              .doc('users/$uid/badge_progress')
+              .get();
+
+      if (doc.exists && mounted) {
+        final data = doc.data()!;
+        setState(() {
+          _filesUploaded = data['filesUploaded'] ?? 0;
+          _aiChatInteractions = data['aiChatInteractions'] ?? 0;
+          _questionsAnswered = data['questionsAnswered'] ?? 0;
+          _correctAnswers = data['correctAnswers'] ?? 0;
+          _loginDays = data['loginDays'] ?? 0;
+          if (data['lastLoginDate'] != null) {
+            _lastLoginDate = (data['lastLoginDate'] as Timestamp).toDate();
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load badge progress: $e');
+    }
+  }
+
+  Future<void> _updateBadgeProgress(Map<String, dynamic> updates) async {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    try {
+      await FirebaseFirestore.instance
+          .doc('users/$uid/badge_progress')
+          .set(updates, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Failed to update badge progress: $e');
+    }
+  }
+
+  void _trackLoginDay() {
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+
+    if (_lastLoginDate == null) {
+      // First login
+      setState(() {
+        _loginDays = 1;
+        _lastLoginDate = todayDate;
+      });
+      _updateBadgeProgress({
+        'loginDays': _loginDays,
+        'lastLoginDate': Timestamp.fromDate(todayDate),
+      });
+    } else {
+      final lastDate = DateTime(
+        _lastLoginDate!.year,
+        _lastLoginDate!.month,
+        _lastLoginDate!.day,
+      );
+      final daysDifference = todayDate.difference(lastDate).inDays;
+
+      if (daysDifference == 1) {
+        // Consecutive day
+        setState(() {
+          _loginDays++;
+          _lastLoginDate = todayDate;
+        });
+        _updateBadgeProgress({
+          'loginDays': _loginDays,
+          'lastLoginDate': Timestamp.fromDate(todayDate),
+        });
+      } else if (daysDifference > 1) {
+        // Streak broken, reset
+        setState(() {
+          _loginDays = 1;
+          _lastLoginDate = todayDate;
+        });
+        _updateBadgeProgress({
+          'loginDays': _loginDays,
+          'lastLoginDate': Timestamp.fromDate(todayDate),
+        });
+      }
+      // If daysDifference == 0, it's the same day, no update needed
+    }
+  }
+
+  void _incrementFileUploaded() {
+    setState(() {
+      _filesUploaded++;
+    });
+    _updateBadgeProgress({'filesUploaded': _filesUploaded});
+  }
+
+  void _incrementAiChatInteraction() {
+    setState(() {
+      _aiChatInteractions++;
+    });
+    _updateBadgeProgress({'aiChatInteractions': _aiChatInteractions});
+  }
+
+  void _incrementQuestionAnswered(bool isCorrect) {
+    setState(() {
+      _questionsAnswered++;
+      if (isCorrect) {
+        _correctAnswers++;
+      }
+    });
+    _updateBadgeProgress({
+      'questionsAnswered': _questionsAnswered,
+      'correctAnswers': _correctAnswers,
+    });
+  }
+
   /* ── UI build ─────────────────────────────────────────────── */
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -213,7 +341,12 @@ class _HomeScreenState extends State<HomeScreen> {
         filesByFolder: _filesByFolder,
         selectedFolderId: _selectedFolder?.id,
         collapsed: _collapsed,
-        onDashboardTap: () => _snack('Dashboard (todo)'),
+        onDashboardTap:
+            () => setState(() {
+              _showDashboard = true;
+              _selectedFolder = null;
+              _previewFile = null;
+            }),
         onCreateFolder: _createFolderDialog,
         onUploadFile: _pickFiles,
         onToggleFolder:
@@ -227,8 +360,13 @@ class _HomeScreenState extends State<HomeScreen> {
               _selectedFolder =
                   id == null ? null : _folders.firstWhere((f) => f.id == id);
               _previewFile = null;
+              _showDashboard = false;
             }),
-        onSelectAnyFile: (file) => setState(() => _previewFile = file),
+        onSelectAnyFile:
+            (file) => setState(() {
+              _previewFile = file;
+              _showDashboard = false;
+            }),
         onSignOut: () async => FirebaseAuth.instance.signOut(),
         onUpgradePlan: () => _snack('Upgrade plan (todo)'),
         sidebarCollapsed: _sidebarCollapsed,
@@ -245,7 +383,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
       /* Main content area */
       Widget content;
-      if (_previewFile != null) {
+      if (_showDashboard) {
+        content = DashboardScreen(
+          filesUploaded: _filesUploaded,
+          aiChatInteractions: _aiChatInteractions,
+          questionsAnswered: _questionsAnswered,
+          correctAnswers: _correctAnswers,
+          loginDays: _loginDays,
+        );
+      } else if (_previewFile != null) {
         content = MainPane(
           selectedFolder: _selectedFolder,
           files: _visibleFiles,
@@ -281,18 +427,58 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       }
 
-      return Scaffold(
-        drawer: compact ? Drawer(child: sidebar) : null,
-        body:
-            compact
-                ? content
-                : Row(
-                  children: [
-                    sidebar,
-                    const VerticalDivider(width: 1),
-                    Expanded(child: content),
-                  ],
+      return Stack(
+        children: [
+          Scaffold(
+            drawer: compact ? Drawer(child: sidebar) : null,
+            body:
+                compact
+                    ? content
+                    : Row(
+                      children: [
+                        sidebar,
+                        const VerticalDivider(width: 1),
+                        Expanded(child: content),
+                      ],
+                    ),
+          ),
+          // Loading overlay
+          if (_isLoading || _isUploading)
+            Container(
+              color: Colors.black54,
+              child: Center(
+                child: Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircularProgressIndicator(),
+                        const SizedBox(height: 16),
+                        Text(
+                          _loadingMessage.isNotEmpty
+                              ? _loadingMessage
+                              : 'Loading...',
+                          style: const TextStyle(fontSize: 16),
+                        ),
+                        if (_isUploading && _uploadProgress > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 16),
+                            child: Column(
+                              children: [
+                                LinearProgressIndicator(value: _uploadProgress),
+                                const SizedBox(height: 8),
+                                Text('${(_uploadProgress * 100).toInt()}%'),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
                 ),
+              ),
+            ),
+        ],
       );
     },
   );
@@ -320,26 +506,43 @@ class _HomeScreenState extends State<HomeScreen> {
                   final name = ctl.text.trim();
                   if (name.isEmpty) return;
 
-                  final f = Folder(
-                    id: DateTime.now().millisecondsSinceEpoch.toString(),
-                    name: name,
-                  );
-                  final uid = FirebaseAuth.instance.currentUser!.uid;
-                  await _safeSet(
-                    FirebaseFirestore.instance.doc(
-                      'users/$uid/folders/${f.id}',
-                    ),
-                    {'name': f.name, 'createdAt': FieldValue.serverTimestamp()},
-                  );
-                  if (mounted) {
-                    setState(() {
-                      _folders.add(f);
-                      _selectedFolder = f;
-                      _clearPreview();
-                    });
-                  }
-                  // ignore: use_build_context_synchronously
                   Navigator.pop(context);
+                  setState(() {
+                    _isLoading = true;
+                    _loadingMessage = 'Creating folder...';
+                  });
+
+                  try {
+                    final f = Folder(
+                      id: DateTime.now().millisecondsSinceEpoch.toString(),
+                      name: name,
+                    );
+                    final uid = FirebaseAuth.instance.currentUser!.uid;
+                    await _safeSet(
+                      FirebaseFirestore.instance.doc(
+                        'users/$uid/folders/${f.id}',
+                      ),
+                      {
+                        'name': f.name,
+                        'createdAt': FieldValue.serverTimestamp(),
+                      },
+                    );
+                    if (mounted) {
+                      setState(() {
+                        _folders.add(f);
+                      });
+                      _snack('Folder "$name" created successfully');
+                    }
+                  } catch (e) {
+                    _snack('Failed to create folder: $e', err: true);
+                  } finally {
+                    if (mounted) {
+                      setState(() {
+                        _isLoading = false;
+                        _loadingMessage = '';
+                      });
+                    }
+                  }
                 },
                 child: const Text('Create'),
               ),
@@ -366,6 +569,12 @@ class _HomeScreenState extends State<HomeScreen> {
     if (dropped.isEmpty) return;
     final folderId = target?.id; // null → top level
 
+    setState(() {
+      _isUploading = true;
+      _uploadProgress = 0.0;
+      _loadingMessage = 'Uploading files...';
+    });
+
     // optimistic UI
     final stubs = dropped.map(
       (p) => FileMeta(
@@ -390,14 +599,31 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     // real upload
+    int completed = 0;
     for (final p in dropped) {
       try {
         final meta = await _uploadOne(pFile: p, folderId: folderId);
         _replaceStub(meta);
+        completed++;
+        if (mounted) {
+          setState(() {
+            _uploadProgress = completed / dropped.length;
+          });
+        }
       } catch (e) {
         _snack('Failed to upload ${p.name}: $e', err: true);
       }
     }
+
+    if (mounted) {
+      setState(() {
+        _isUploading = false;
+        _uploadProgress = 0.0;
+        _loadingMessage = '';
+      });
+    }
+
+    _snack('${completed} file(s) uploaded successfully');
   }
 
   Future<FileMeta> _uploadOne({
@@ -430,7 +656,7 @@ class _HomeScreenState extends State<HomeScreen> {
       'folderId': folderId,
     });
 
-    return FileMeta(
+    final result = FileMeta(
       id: doc.id,
       name: pFile.name,
       size: pFile.size,
@@ -439,6 +665,11 @@ class _HomeScreenState extends State<HomeScreen> {
       uploadedAt: DateTime.now(),
       folderId: folderId,
     );
+
+    // Track badge progress
+    _incrementFileUploaded();
+
+    return result;
   }
 
   void _replaceStub(FileMeta real) {
@@ -482,7 +713,21 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
     );
     if (confirmed == true) {
-      await _deleteFile(file);
+      setState(() {
+        _isLoading = true;
+        _loadingMessage = 'Deleting file...';
+      });
+
+      try {
+        await _deleteFile(file);
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _loadingMessage = '';
+          });
+        }
+      }
     }
   }
 
@@ -509,7 +754,21 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
     );
     if (confirmed == true) {
-      await _deleteFolder(folder);
+      setState(() {
+        _isLoading = true;
+        _loadingMessage = 'Deleting folder...';
+      });
+
+      try {
+        await _deleteFolder(folder);
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _loadingMessage = '';
+          });
+        }
+      }
     }
   }
 
@@ -550,7 +809,21 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
     );
     if (confirmed == true) {
-      await _performClearAllData();
+      setState(() {
+        _isLoading = true;
+        _loadingMessage = 'Clearing all data...';
+      });
+
+      try {
+        await _performClearAllData();
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+            _loadingMessage = '';
+          });
+        }
+      }
     }
   }
 
