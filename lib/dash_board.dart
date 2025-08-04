@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:math' as math;
 import 'constants.dart';
+import 'screens/chat_sessions_screen.dart';
 
 /// Comprehensive Dashboard with Gamification & Analytics
 class DashboardScreen extends StatefulWidget {
@@ -1013,6 +1014,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
             widget.onUploadFiles?.call();
           }),
           const SizedBox(height: 12),
+          _buildActionButton(
+            'Chat Sessions',
+            Icons.chat_bubble,
+            Colors.blue,
+            () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ChatSessionsScreen(),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
           _buildActionButton('Generate Quiz', Icons.quiz, Colors.green, () {
             widget.onGenerateQuiz?.call();
           }),
@@ -1699,7 +1714,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ),
                 )
-                
           else
             Container(
               padding: const EdgeInsets.all(16),

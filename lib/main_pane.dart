@@ -23,7 +23,7 @@ import 'models.dart'; // ← contains Folder & FileMeta classes
 import 'drag_drop_zone.dart';
 import 'file_viewer.dart';
 import 'services/file_content_extractor.dart';
-import 'widgets/ai_chat_widget.dart';
+import 'widgets/enhanced_ai_chat_widget.dart';
 
 class MainPane extends StatelessWidget {
   const MainPane({
@@ -150,10 +150,13 @@ class MainPane extends StatelessWidget {
                         )
                         : (snapshot.connectionState == ConnectionState.waiting
                             ? const Center(child: CircularProgressIndicator())
-                            : AIChatWidget(
+                            : EnhancedAIChatWidget(
                               fileName: previewFile!.name,
                               fileType: previewFile!.type,
                               fileContent: snapshot.data ?? '',
+                              filePath:
+                                  previewFile!
+                                      .url, // Using URL as file path for now
                               onInteractionSuccess: onAIInteractionSuccess,
                             )),
               ),

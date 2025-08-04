@@ -1,0 +1,452 @@
+import 'dart:convert';
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../models/chat_models.dart';
+
+/// Smart conversation manager for enhanced AI chat functionality
+class ConversationManager {
+  static const String _sessionsKey = 'chat_sessions';
+  static const String _analyticsKey = 'chat_analytics';
+
+  static ConversationManager? _instance;
+  static ConversationManager get instance =>
+      _instance ??= ConversationManager._();
+  ConversationManager._();
+
+  SharedPreferences? _prefs;
+  List<ChatSession> _sessions = [];
+  ChatAnalytics? _analytics;
+
+  /// Initialize the conversation manager
+  Future<void> initialize() async {
+    _prefs ??= await SharedPreferences.getInstance();
+    await _loadSessions();
+    await _loadAnalytics();
+  }
+
+  /// Load all chat sessions from storage
+  Future<void> _loadSessions() async {
+    try {
+      final sessionsJson = _prefs?.getStringList(_sessionsKey) ?? [];
+      _sessions =
+          sessionsJson
+              .map((jsonStr) => ChatSession.fromJson(json.decode(jsonStr)))
+              .toList();
+
+      // Sort by last updated (most recent first)
+      _sessions.sort((a, b) => b.lastUpdatedAt.compareTo(a.lastUpdatedAt));
+    } catch (e) {
+      debugPrint('Error loading chat sessions: $e');
+      _sessions = [];
+    }
+  }
+
+  /// Save all sessions to storage
+  Future<void> _saveSessions() async {
+    try {
+      final sessionsJson =
+          _sessions.map((session) => json.encode(session.toJson())).toList();
+      await _prefs?.setStringList(_sessionsKey, sessionsJson);
+    } catch (e) {
+      debugPrint('Error saving chat sessions: $e');
+    }
+  }
+
+  /// Load analytics from storage
+  Future<void> _loadAnalytics() async {
+    try {
+      final analyticsJson = _prefs?.getString(_analyticsKey);
+      if (analyticsJson != null) {
+        _analytics = ChatAnalytics.fromJson(json.decode(analyticsJson));
+      }
+    } catch (e) {
+      debugPrint('Error loading chat analytics: $e');
+    }
+  }
+
+  /// Save analytics to storage
+  Future<void> _saveAnalytics() async {
+    try {
+      if (_analytics != null) {
+        await _prefs?.setString(
+          _analyticsKey,
+          json.encode(_analytics!.toJson()),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error saving chat analytics: $e');
+    }
+  }
+
+  /// Get or create a chat session for a specific file
+  Future<ChatSession> getOrCreateSession({
+    required String fileName,
+    required String fileType,
+    required String filePath,
+    Map<String, dynamic>? fileMetadata,
+  }) async {
+    // Look for existing session
+    final existingSession = _sessions.firstWhere(
+      (session) => session.filePath == filePath && !session.isArchived,
+      orElse:
+          () => _createNewSession(
+            fileName: fileName,
+            fileType: fileType,
+            filePath: filePath,
+            fileMetadata: fileMetadata,
+          ),
+    );
+
+    // If we found an existing session, return it
+    if (_sessions.contains(existingSession)) {
+      return existingSession;
+    }
+
+    // If it's a new session, add it to the list and save
+    _sessions.insert(0, existingSession);
+    await _saveSessions();
+    return existingSession;
+  }
+
+  /// Create a new chat session
+  ChatSession _createNewSession({
+    required String fileName,
+    required String fileType,
+    required String filePath,
+    Map<String, dynamic>? fileMetadata,
+  }) {
+    final now = DateTime.now();
+    final sessionId = _generateSessionId();
+
+    return ChatSession(
+      id: sessionId,
+      fileName: fileName,
+      fileType: fileType,
+      filePath: filePath,
+      createdAt: now,
+      lastUpdatedAt: now,
+      messages: [_createWelcomeMessage(fileName, sessionId)],
+      fileMetadata: fileMetadata ?? {},
+    );
+  }
+
+  /// Generate a unique session ID
+  String _generateSessionId() {
+    final now = DateTime.now();
+    final random = Random();
+    return 'session_${now.millisecondsSinceEpoch}_${random.nextInt(10000)}';
+  }
+
+  /// Create a welcome message for new sessions
+  EnhancedChatMessage _createWelcomeMessage(String fileName, String sessionId) {
+    return EnhancedChatMessage(
+      id: '${sessionId}_welcome',
+      text:
+          'Hello! I\'m FileGenius AI. I can help you analyze "$fileName" and answer questions about it. What would you like to know?',
+      isUser: false,
+      timestamp: DateTime.now(),
+      messageType: 'welcome',
+      metadata: {'isSystemMessage': true},
+    );
+  }
+
+  /// Add a message to a session
+  Future<void> addMessage({
+    required String sessionId,
+    required EnhancedChatMessage message,
+  }) async {
+    final sessionIndex = _sessions.indexWhere((s) => s.id == sessionId);
+    if (sessionIndex != -1) {
+      final updatedMessages = List<EnhancedChatMessage>.from(
+        _sessions[sessionIndex].messages,
+      )..add(message);
+
+      _sessions[sessionIndex] = _sessions[sessionIndex].copyWith(
+        messages: updatedMessages,
+        lastUpdatedAt: DateTime.now(),
+      );
+
+      // Move session to top of list
+      final updatedSession = _sessions.removeAt(sessionIndex);
+      _sessions.insert(0, updatedSession);
+
+      await _saveSessions();
+      await _updateAnalytics(message);
+    }
+  }
+
+  /// Update a specific message in a session
+  Future<void> updateMessage({
+    required String sessionId,
+    required String messageId,
+    required EnhancedChatMessage updatedMessage,
+  }) async {
+    final sessionIndex = _sessions.indexWhere((s) => s.id == sessionId);
+    if (sessionIndex != -1) {
+      final messages = _sessions[sessionIndex].messages;
+      final messageIndex = messages.indexWhere((m) => m.id == messageId);
+
+      if (messageIndex != -1) {
+        messages[messageIndex] = updatedMessage;
+        _sessions[sessionIndex] = _sessions[sessionIndex].copyWith(
+          messages: messages,
+          lastUpdatedAt: DateTime.now(),
+        );
+        await _saveSessions();
+      }
+    }
+  }
+
+  /// Delete a message from a session
+  Future<void> deleteMessage({
+    required String sessionId,
+    required String messageId,
+  }) async {
+    final sessionIndex = _sessions.indexWhere((s) => s.id == sessionId);
+    if (sessionIndex != -1) {
+      final updatedMessages =
+          _sessions[sessionIndex].messages
+              .where((m) => m.id != messageId)
+              .toList();
+
+      _sessions[sessionIndex] = _sessions[sessionIndex].copyWith(
+        messages: updatedMessages,
+        lastUpdatedAt: DateTime.now(),
+      );
+      await _saveSessions();
+    }
+  }
+
+  /// Clear all messages in a session (except welcome message)
+  Future<void> clearSession(String sessionId) async {
+    final sessionIndex = _sessions.indexWhere((s) => s.id == sessionId);
+    if (sessionIndex != -1) {
+      final session = _sessions[sessionIndex];
+      final welcomeMessage = session.messages.firstWhere(
+        (m) => m.messageType == 'welcome',
+        orElse: () => _createWelcomeMessage(session.fileName, sessionId),
+      );
+
+      _sessions[sessionIndex] = session.copyWith(
+        messages: [welcomeMessage],
+        lastUpdatedAt: DateTime.now(),
+      );
+      await _saveSessions();
+    }
+  }
+
+  /// Archive a session
+  Future<void> archiveSession(String sessionId) async {
+    final sessionIndex = _sessions.indexWhere((s) => s.id == sessionId);
+    if (sessionIndex != -1) {
+      _sessions[sessionIndex] = _sessions[sessionIndex].copyWith(
+        isArchived: true,
+        lastUpdatedAt: DateTime.now(),
+      );
+      await _saveSessions();
+    }
+  }
+
+  /// Delete a session permanently
+  Future<void> deleteSession(String sessionId) async {
+    _sessions.removeWhere((s) => s.id == sessionId);
+    await _saveSessions();
+  }
+
+  /// Get all active sessions
+  List<ChatSession> getActiveSessions() {
+    return _sessions.where((s) => !s.isArchived).toList();
+  }
+
+  /// Get archived sessions
+  List<ChatSession> getArchivedSessions() {
+    return _sessions.where((s) => s.isArchived).toList();
+  }
+
+  /// Get recent sessions (last 10)
+  List<ChatSession> getRecentSessions({int limit = 10}) {
+    return _sessions.where((s) => !s.isArchived).take(limit).toList();
+  }
+
+  /// Search sessions by filename or content
+  List<ChatSession> searchSessions(String query) {
+    final lowerQuery = query.toLowerCase();
+    return _sessions.where((session) {
+      return session.fileName.toLowerCase().contains(lowerQuery) ||
+          session.messages.any(
+            (message) => message.text.toLowerCase().contains(lowerQuery),
+          );
+    }).toList();
+  }
+
+  /// Get session by ID
+  ChatSession? getSessionById(String sessionId) {
+    try {
+      return _sessions.firstWhere((s) => s.id == sessionId);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /// Update analytics based on new message
+  Future<void> _updateAnalytics(EnhancedChatMessage message) async {
+    // Initialize analytics if null
+    _analytics ??= ChatAnalytics(
+      totalSessions: 0,
+      totalMessages: 0,
+      totalQuestions: 0,
+      questionCategories: {},
+      fileTypeInteractions: {},
+      averageSessionLength: 0.0,
+      popularQuestions: [],
+      lastAnalyzed: DateTime.now(),
+    );
+
+    // Update analytics
+    if (message.isUser) {
+      // This is a user question
+      final updatedQuestionCategories = Map<String, int>.from(
+        _analytics!.questionCategories,
+      );
+      final category = message.messageType ?? 'general';
+      updatedQuestionCategories[category] =
+          (updatedQuestionCategories[category] ?? 0) + 1;
+
+      _analytics = ChatAnalytics(
+        totalSessions: _sessions.length,
+        totalMessages: _analytics!.totalMessages + 1,
+        totalQuestions: _analytics!.totalQuestions + 1,
+        questionCategories: updatedQuestionCategories,
+        fileTypeInteractions: _analytics!.fileTypeInteractions,
+        averageSessionLength: _calculateAverageSessionLength(),
+        popularQuestions: _analytics!.popularQuestions,
+        lastAnalyzed: DateTime.now(),
+      );
+    } else {
+      // This is an AI response
+      _analytics = ChatAnalytics(
+        totalSessions: _sessions.length,
+        totalMessages: _analytics!.totalMessages + 1,
+        totalQuestions: _analytics!.totalQuestions,
+        questionCategories: _analytics!.questionCategories,
+        fileTypeInteractions: _analytics!.fileTypeInteractions,
+        averageSessionLength: _calculateAverageSessionLength(),
+        popularQuestions: _analytics!.popularQuestions,
+        lastAnalyzed: DateTime.now(),
+      );
+    }
+
+    await _saveAnalytics();
+  }
+
+  /// Calculate average session length
+  double _calculateAverageSessionLength() {
+    if (_sessions.isEmpty) return 0.0;
+
+    final totalMessages = _sessions.fold<int>(
+      0,
+      (sum, session) => sum + session.messages.length,
+    );
+
+    return totalMessages / _sessions.length;
+  }
+
+  /// Get conversation context for AI (last few messages)
+  List<EnhancedChatMessage> getConversationContext(
+    String sessionId, {
+    int maxMessages = 5,
+  }) {
+    final session = getSessionById(sessionId);
+    if (session == null) return [];
+
+    // Get last few messages for context, excluding system messages
+    final contextMessages =
+        session.messages
+            .where((m) => m.metadata?['isSystemMessage'] != true)
+            .toList();
+
+    if (contextMessages.length <= maxMessages) {
+      return contextMessages;
+    }
+
+    return contextMessages.sublist(contextMessages.length - maxMessages);
+  }
+
+  /// Get analytics
+  ChatAnalytics? getAnalytics() => _analytics;
+
+  /// Export session to different formats
+  Future<String> exportSession({
+    required String sessionId,
+    required ExportFormat format,
+  }) async {
+    final session = getSessionById(sessionId);
+    if (session == null) throw Exception('Session not found');
+
+    switch (format) {
+      case ExportFormat.txt:
+        return _exportToText(session);
+      case ExportFormat.md:
+        return _exportToMarkdown(session);
+      case ExportFormat.json:
+        return _exportToJson(session);
+      case ExportFormat.pdf:
+        // PDF export would require additional dependencies
+        throw UnimplementedError('PDF export not yet implemented');
+    }
+  }
+
+  /// Export session to plain text
+  String _exportToText(ChatSession session) {
+    final buffer = StringBuffer();
+    buffer.writeln('Chat Session Export');
+    buffer.writeln('File: ${session.fileName}');
+    buffer.writeln('Date: ${session.createdAt.toString()}');
+    buffer.writeln('=' * 50);
+    buffer.writeln();
+
+    for (final message in session.messages) {
+      final sender = message.isUser ? 'You' : 'AI Assistant';
+      final time =
+          '${message.timestamp.hour.toString().padLeft(2, '0')}:${message.timestamp.minute.toString().padLeft(2, '0')}';
+
+      buffer.writeln('[$time] $sender:');
+      buffer.writeln(message.text);
+      buffer.writeln();
+    }
+
+    return buffer.toString();
+  }
+
+  /// Export session to Markdown
+  String _exportToMarkdown(ChatSession session) {
+    final buffer = StringBuffer();
+    buffer.writeln('# Chat Session Export');
+    buffer.writeln();
+    buffer.writeln('**File:** ${session.fileName}');
+    buffer.writeln('**Date:** ${session.createdAt.toString()}');
+    buffer.writeln('**Message Count:** ${session.messages.length}');
+    buffer.writeln();
+    buffer.writeln('---');
+    buffer.writeln();
+
+    for (final message in session.messages) {
+      final sender = message.isUser ? '👤 **You**' : '🤖 **AI Assistant**';
+      final time =
+          '${message.timestamp.hour.toString().padLeft(2, '0')}:${message.timestamp.minute.toString().padLeft(2, '0')}';
+
+      buffer.writeln('## $sender *($time)*');
+      buffer.writeln();
+      buffer.writeln(message.text);
+      buffer.writeln();
+    }
+
+    return buffer.toString();
+  }
+
+  /// Export session to JSON
+  String _exportToJson(ChatSession session) {
+    return json.encode(session.toJson());
+  }
+}
