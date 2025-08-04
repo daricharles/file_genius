@@ -6,7 +6,6 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:uuid/uuid.dart';
 import '../services/ai_service.dart';
 import '../services/conversation_manager.dart';
-import '../services/question_suggestions_service.dart';
 import '../models/chat_models.dart';
 import 'package:intl/intl.dart';
 
@@ -38,8 +37,6 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   final ScrollController _scrollController = ScrollController();
   final AIService _aiService = AIService();
   final ConversationManager _conversationManager = ConversationManager.instance;
-  final QuestionSuggestionsService _suggestionsService =
-      QuestionSuggestionsService.instance;
   final Uuid _uuid = const Uuid();
 
   ChatSession? _currentSession;
@@ -48,8 +45,6 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   bool _aiTyping = false;
 
   // UI State
-  bool _showSuggestions = true;
-  final bool _showQuickActions = true;
   String? _selectedRole;
   String? _selectedDocType;
   String? _selectedFormat;
@@ -57,12 +52,6 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   // Animation controllers
   late AnimationController _typingAnimationController;
   late Animation<double> _typingAnimation;
-  late AnimationController _suggestionAnimationController;
-
-  // Suggestions
-  List<QuestionSuggestion> _contextualSuggestions = [];
-  List<QuestionSuggestion> _quickActions = [];
-  List<FollowUpSuggestion> _followUpSuggestions = [];
 
   final List<String> _roles = [
     'Student',
@@ -104,11 +93,6 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
         curve: Curves.easeInOut,
       ),
     );
-
-    _suggestionAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 300),
-      vsync: this,
-    );
   }
 
   Future<void> _initializeChat() async {
@@ -122,8 +106,6 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
         fileMetadata: widget.fileMetadata,
       );
 
-      _loadSuggestions();
-
       setState(() {
         _isInitializing = false;
       });
@@ -135,25 +117,11 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     }
   }
 
-  void _loadSuggestions() {
-    _contextualSuggestions = _suggestionsService.getContextualSuggestions(
-      fileType: widget.fileType,
-      content: widget.fileContent,
-      conversationHistory: _currentSession?.messages,
-      maxSuggestions: 6,
-    );
-
-    _quickActions = _suggestionsService.getQuickActions(widget.fileType);
-
-    setState(() {});
-  }
-
   @override
   void dispose() {
     _questionController.dispose();
     _scrollController.dispose();
     _typingAnimationController.dispose();
-    _suggestionAnimationController.dispose();
     super.dispose();
   }
 
@@ -176,10 +144,10 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       message: userMessage,
     );
 
+    // Update loading state once, avoiding multiple rebuilds
     setState(() {
       _isLoading = true;
       _aiTyping = true;
-      _showSuggestions = false;
     });
 
     _typingAnimationController.repeat();
@@ -222,34 +190,31 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
           message: aiMessage,
         );
 
-        // Generate follow-up suggestions
-        _followUpSuggestions = _suggestionsService.generateFollowUpSuggestions(
-          aiResponse: response.data!['answer'],
-          fileType: widget.fileType,
-          originalQuestion: question,
-        );
-
-        // Record question usage for analytics
-        _suggestionsService.recordQuestionUsage(messageType ?? 'custom');
-
         // Call success callback
         widget.onInteractionSuccess?.call();
 
+        // Update state once with all changes
         setState(() {
-          _showSuggestions = true;
+          _isLoading = false;
+          _aiTyping = false;
         });
       } else {
+        // Handle error state
+        setState(() {
+          _isLoading = false;
+          _aiTyping = false;
+        });
         _showErrorMessage(response.message);
       }
     } catch (e) {
       _typingAnimationController.stop();
+      // Handle error state
+      setState(() {
+        _isLoading = false;
+        _aiTyping = false;
+      });
       _showErrorMessage('Failed to get response: ${e.toString()}');
     }
-
-    setState(() {
-      _isLoading = false;
-      _aiTyping = false;
-    });
 
     _scrollToBottom();
   }
@@ -287,10 +252,8 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   Future<void> _clearChat() async {
     if (_currentSession != null) {
       await _conversationManager.clearSession(_currentSession!.id);
-      _loadSuggestions();
       setState(() {
-        _showSuggestions = true;
-        _followUpSuggestions = [];
+        // Session cleared, messages will be updated
       });
     }
   }
@@ -375,11 +338,8 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     return Column(
       children: [
         _buildHeader(),
-        if (_showQuickActions) _buildQuickActions(),
-        if (_showSuggestions) _buildSuggestions(),
         _buildRoleSelections(),
         Expanded(child: _buildMessageList()),
-        if (_followUpSuggestions.isNotEmpty) _buildFollowUpSuggestions(),
         if (_aiTyping) _buildTypingIndicator(),
         _buildInputArea(),
       ],
@@ -519,183 +479,6 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
               fontSize: 12,
               fontWeight: FontWeight.w600,
               color: Theme.of(context).primaryColor,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildQuickActions() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Quick Actions',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w600,
-              color: Theme.of(
-                context,
-              ).textTheme.bodySmall?.color?.withOpacity(0.7),
-            ),
-          ),
-          const SizedBox(height: 8),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children:
-                  _quickActions.map((action) {
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ActionChip(
-                        avatar: Icon(action.icon, size: 18),
-                        label: Text(action.question),
-                        onPressed:
-                            _isLoading
-                                ? null
-                                : () => _sendMessage(
-                                  prompt: action.question,
-                                  messageType: action.category.toLowerCase(),
-                                ),
-                        backgroundColor: Theme.of(
-                          context,
-                        ).primaryColor.withOpacity(0.1),
-                        labelStyle: TextStyle(
-                          color: Theme.of(context).primaryColor,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    );
-                  }).toList(),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSuggestions() {
-    if (_contextualSuggestions.isEmpty) return const SizedBox();
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Text(
-                'Suggested Questions',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.color?.withOpacity(0.7),
-                ),
-              ),
-              const Spacer(),
-              IconButton(
-                icon: Icon(
-                  _showSuggestions ? Icons.expand_less : Icons.expand_more,
-                ),
-                onPressed:
-                    () => setState(() => _showSuggestions = !_showSuggestions),
-                iconSize: 20,
-              ),
-            ],
-          ),
-          if (_showSuggestions) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children:
-                  _contextualSuggestions.map((suggestion) {
-                    return ActionChip(
-                      avatar: Icon(suggestion.icon, size: 16),
-                      label: Text(
-                        suggestion.question,
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                      onPressed:
-                          _isLoading
-                              ? null
-                              : () => _sendMessage(
-                                prompt: suggestion.question,
-                                messageType: suggestion.category.toLowerCase(),
-                              ),
-                      backgroundColor: Colors.grey[100],
-                      labelStyle: TextStyle(
-                        color: Colors.grey[700],
-                        fontWeight: FontWeight.w500,
-                      ),
-                    );
-                  }).toList(),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFollowUpSuggestions() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.blue[50],
-        border: Border(top: BorderSide(color: Colors.blue[200]!)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.lightbulb, size: 16, color: Colors.blue[600]),
-              const SizedBox(width: 4),
-              Text(
-                'Follow-up suggestions',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.blue[600],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children:
-                  _followUpSuggestions.map((suggestion) {
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ActionChip(
-                        avatar: Icon(suggestion.icon, size: 14),
-                        label: Text(
-                          suggestion.question,
-                          style: const TextStyle(fontSize: 11),
-                        ),
-                        onPressed:
-                            _isLoading
-                                ? null
-                                : () {
-                                  _sendMessage(
-                                    prompt: suggestion.question,
-                                    messageType: 'follow_up',
-                                  );
-                                  setState(() => _followUpSuggestions = []);
-                                },
-                        backgroundColor: Colors.blue[100],
-                        labelStyle: TextStyle(
-                          color: Colors.blue[700],
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    );
-                  }).toList(),
             ),
           ),
         ],

@@ -1,39 +1,30 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../models/chat_models.dart';
+import 'firebase_chat_service.dart';
 
-/// Smart conversation manager for enhanced AI chat functionality
+/// Smart conversation manager for enhanced AI chat functionality using Firebase
 class ConversationManager {
-  static const String _sessionsKey = 'chat_sessions';
-  static const String _analyticsKey = 'chat_analytics';
-
   static ConversationManager? _instance;
   static ConversationManager get instance =>
       _instance ??= ConversationManager._();
   ConversationManager._();
 
-  SharedPreferences? _prefs;
+  final FirebaseChatService _firebaseService = FirebaseChatService();
   List<ChatSession> _sessions = [];
   ChatAnalytics? _analytics;
 
   /// Initialize the conversation manager
   Future<void> initialize() async {
-    _prefs ??= await SharedPreferences.getInstance();
     await _loadSessions();
     await _loadAnalytics();
   }
 
-  /// Load all chat sessions from storage
+  /// Load all chat sessions from Firebase
   Future<void> _loadSessions() async {
     try {
-      final sessionsJson = _prefs?.getStringList(_sessionsKey) ?? [];
-      _sessions =
-          sessionsJson
-              .map((jsonStr) => ChatSession.fromJson(json.decode(jsonStr)))
-              .toList();
-
+      _sessions = await _firebaseService.loadChatSessions();
       // Sort by last updated (most recent first)
       _sessions.sort((a, b) => b.lastUpdatedAt.compareTo(a.lastUpdatedAt));
     } catch (e) {
@@ -42,40 +33,34 @@ class ConversationManager {
     }
   }
 
-  /// Save all sessions to storage
-  Future<void> _saveSessions() async {
+  /// Save analytics to Firebase
+  Future<void> _saveAnalytics() async {
     try {
-      final sessionsJson =
-          _sessions.map((session) => json.encode(session.toJson())).toList();
-      await _prefs?.setStringList(_sessionsKey, sessionsJson);
+      if (_analytics != null) {
+        await _firebaseService.saveChatAnalytics(_analytics!);
+      }
     } catch (e) {
-      debugPrint('Error saving chat sessions: $e');
+      debugPrint('Error saving chat analytics: $e');
     }
   }
 
-  /// Load analytics from storage
+  /// Load analytics from Firebase
   Future<void> _loadAnalytics() async {
     try {
-      final analyticsJson = _prefs?.getString(_analyticsKey);
-      if (analyticsJson != null) {
-        _analytics = ChatAnalytics.fromJson(json.decode(analyticsJson));
-      }
+      _analytics = await _firebaseService.loadChatAnalytics();
     } catch (e) {
       debugPrint('Error loading chat analytics: $e');
     }
   }
 
-  /// Save analytics to storage
-  Future<void> _saveAnalytics() async {
+  /// Clear all chat data
+  Future<void> clearAllData() async {
     try {
-      if (_analytics != null) {
-        await _prefs?.setString(
-          _analyticsKey,
-          json.encode(_analytics!.toJson()),
-        );
-      }
+      _sessions.clear();
+      _analytics = null; // Reset analytics to null
+      await _firebaseService.clearAllChatData();
     } catch (e) {
-      debugPrint('Error saving chat analytics: $e');
+      debugPrint('Error clearing all chat data: $e');
     }
   }
 
@@ -105,7 +90,8 @@ class ConversationManager {
 
     // If it's a new session, add it to the list and save
     _sessions.insert(0, existingSession);
-    await _saveSessions();
+    // Save individual session to Firebase
+    await _firebaseService.saveChatSession(existingSession);
     return existingSession;
   }
 
@@ -171,7 +157,8 @@ class ConversationManager {
       final updatedSession = _sessions.removeAt(sessionIndex);
       _sessions.insert(0, updatedSession);
 
-      await _saveSessions();
+      // Save individual session to Firebase
+      await _firebaseService.saveChatSession(updatedSession);
       await _updateAnalytics(message);
     }
   }
@@ -193,7 +180,8 @@ class ConversationManager {
           messages: messages,
           lastUpdatedAt: DateTime.now(),
         );
-        await _saveSessions();
+        // Save individual session to Firebase
+        await _firebaseService.saveChatSession(_sessions[sessionIndex]);
       }
     }
   }
@@ -214,7 +202,8 @@ class ConversationManager {
         messages: updatedMessages,
         lastUpdatedAt: DateTime.now(),
       );
-      await _saveSessions();
+      // Save individual session to Firebase
+      await _firebaseService.saveChatSession(_sessions[sessionIndex]);
     }
   }
 
@@ -232,7 +221,8 @@ class ConversationManager {
         messages: [welcomeMessage],
         lastUpdatedAt: DateTime.now(),
       );
-      await _saveSessions();
+      // Save individual session to Firebase
+      await _firebaseService.saveChatSession(_sessions[sessionIndex]);
     }
   }
 
@@ -244,14 +234,16 @@ class ConversationManager {
         isArchived: true,
         lastUpdatedAt: DateTime.now(),
       );
-      await _saveSessions();
+      // Use Firebase archive method
+      await _firebaseService.archiveChatSession(sessionId);
     }
   }
 
   /// Delete a session permanently
   Future<void> deleteSession(String sessionId) async {
     _sessions.removeWhere((s) => s.id == sessionId);
-    await _saveSessions();
+    // Use Firebase delete method
+    await _firebaseService.deleteChatSession(sessionId);
   }
 
   /// Get all active sessions
