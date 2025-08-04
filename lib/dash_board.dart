@@ -233,7 +233,7 @@ class DashboardScreen extends StatelessWidget {
             filesUploaded.toString(),
             Icons.cloud_upload,
             Colors.blue,
-            '+${weeklyUploads} this week',
+            '+$weeklyUploads this week',
           ),
         ),
         const SizedBox(width: 16),
