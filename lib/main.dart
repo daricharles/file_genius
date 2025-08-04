@@ -230,7 +230,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /* ── reactive state ───────────────────────────────────────── */
   final List<Folder> _folders = [];
   final List<FileMeta> _topLevelFiles = [];
@@ -266,23 +266,51 @@ class _HomeScreenState extends State<HomeScreen> {
   List<String> _unlockedBadges = [];
   List<String> _recentAchievements = [];
 
+  // User data
+  String _userName = 'User';
+
+  // Periodic backup timer
+  Timer? _backupTimer;
+
   /* ── life‑cycle ───────────────────────────────────────────── */
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _attachFirestoreStreams();
     _loadBadgeProgress();
+    _loadUserData();
     _trackLoginDay();
+
+    // Set up periodic backup every 5 minutes
+    _backupTimer = Timer.periodic(
+      const Duration(minutes: 5),
+      (timer) => _backupAllProgressData(),
+    );
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _backupTimer?.cancel();
     _foldersSubscription?.cancel();
     _topLevelFilesSubscription?.cancel();
     for (final s in _folderSubs) {
       s.cancel();
     }
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    // Backup data when app goes to background or is paused
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      _backupAllProgressData();
+    }
   }
 
   /* ── Firestore listeners ──────────────────────────────────── */
@@ -368,21 +396,29 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _clearPreview() => setState(() => _previewFile = null);
 
-  /* ── AI and Quiz Interaction Methods ──────────────────────── */
-  void _handleAiInteraction() {
-    _incrementAiChatInteraction();
-    // This method can be called when user interacts with AI features
-    _snack('AI interaction recorded! +5 points');
+  /* ── User Data Loading ────────────────────────────────────── */
+  Future<void> _loadUserData() async {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    try {
+      final userDoc =
+          await FirebaseFirestore.instance.collection('users').doc(uid).get();
+
+      if (userDoc.exists && mounted) {
+        final data = userDoc.data()!;
+        setState(() {
+          _userName = data['displayName'] ?? data['fullName'] ?? 'User';
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load user data: $e');
+    }
   }
 
-  void _handleQuizAnswer(bool isCorrect) {
-    _incrementQuestionAnswered(isCorrect);
-    final pointsText = isCorrect ? '+15 points' : '+2 points';
-    final message =
-        isCorrect
-            ? 'Correct answer! $pointsText'
-            : 'Good try! $pointsText for attempting';
-    _snack(message);
+  /* ── AI Interaction Method for Real File-Based Chat ──────── */
+  void onAIInteractionSuccess() {
+    // This method will be called from the AI chat widget when a successful interaction occurs
+    _incrementAiChatInteraction();
+    _snack('AI interaction recorded! +5 points for file analysis');
   }
 
   /* ── Badge Progress Tracking ──────────────────────────────── */
@@ -433,8 +469,44 @@ class _HomeScreenState extends State<HomeScreen> {
           .collection('settings')
           .doc('badge_progress')
           .set(updates, SetOptions(merge: true));
+      debugPrint('✅ Badge progress updated: ${updates.keys.join(', ')}');
     } catch (e) {
       debugPrint('Failed to update badge progress: $e');
+    }
+  }
+
+  // Comprehensive backup of all user progress data
+  Future<void> _backupAllProgressData() async {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+    try {
+      final allData = {
+        'filesUploaded': _filesUploaded,
+        'aiChatInteractions': _aiChatInteractions,
+        'questionsAnswered': _questionsAnswered,
+        'correctAnswers': _correctAnswers,
+        'loginDays': _loginDays,
+        'totalPoints': _totalPoints,
+        'weeklyUploads': _weeklyUploads,
+        'monthlyUploads': _monthlyUploads,
+        'fileTypeStats': _fileTypeStats,
+        'dailyActivity': _dailyActivity,
+        'unlockedBadges': _unlockedBadges,
+        'recentAchievements': _recentAchievements,
+        'lastLoginDate':
+            _lastLoginDate != null ? Timestamp.fromDate(_lastLoginDate!) : null,
+        'lastBackupDate': Timestamp.now(),
+      };
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('settings')
+          .doc('badge_progress')
+          .set(allData);
+
+      debugPrint('✅ Complete progress data backed up successfully');
+    } catch (e) {
+      debugPrint('Failed to backup complete progress data: $e');
     }
   }
 
@@ -452,6 +524,7 @@ class _HomeScreenState extends State<HomeScreen> {
         'loginDays': _loginDays,
         'lastLoginDate': Timestamp.fromDate(todayDate),
       });
+      _calculatePoints('daily_login');
     } else {
       final lastDate = DateTime(
         _lastLoginDate!.year,
@@ -470,6 +543,8 @@ class _HomeScreenState extends State<HomeScreen> {
           'loginDays': _loginDays,
           'lastLoginDate': Timestamp.fromDate(todayDate),
         });
+        _calculatePoints('daily_login');
+        _calculatePoints('streak_bonus');
       } else if (daysDifference > 1) {
         // Streak broken, reset
         setState(() {
@@ -480,9 +555,13 @@ class _HomeScreenState extends State<HomeScreen> {
           'loginDays': _loginDays,
           'lastLoginDate': Timestamp.fromDate(todayDate),
         });
+        _calculatePoints('daily_login');
       }
       // If daysDifference == 0, it's the same day, no update needed
     }
+
+    // Backup all progress data when user logs in
+    _backupAllProgressData();
   }
 
   void _incrementFileUploaded() {
@@ -498,7 +577,13 @@ class _HomeScreenState extends State<HomeScreen> {
       _monthlyUploads++;
     });
 
-    _updateBadgeProgress({'filesUploaded': _filesUploaded});
+    // Immediate persistence of all file-related data
+    _updateBadgeProgress({
+      'filesUploaded': _filesUploaded,
+      'dailyActivity': _dailyActivity,
+      'weeklyUploads': _weeklyUploads,
+      'monthlyUploads': _monthlyUploads,
+    });
     _calculatePoints('file_upload');
     _checkForNewAchievements();
   }
@@ -507,23 +592,9 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _aiChatInteractions++;
     });
+    // Immediate persistence
     _updateBadgeProgress({'aiChatInteractions': _aiChatInteractions});
     _calculatePoints('ai_chat');
-    _checkForNewAchievements();
-  }
-
-  void _incrementQuestionAnswered(bool isCorrect) {
-    setState(() {
-      _questionsAnswered++;
-      if (isCorrect) {
-        _correctAnswers++;
-      }
-    });
-    _updateBadgeProgress({
-      'questionsAnswered': _questionsAnswered,
-      'correctAnswers': _correctAnswers,
-    });
-    _calculatePoints(isCorrect ? 'correct_answer' : 'answer_attempt');
     _checkForNewAchievements();
   }
 
@@ -555,6 +626,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _totalPoints += points;
     });
 
+    // Immediate persistence of points
     _updateBadgeProgress({'totalPoints': _totalPoints});
   }
 
@@ -607,6 +679,7 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       });
 
+      // Immediate persistence of badge progress
       _updateBadgeProgress({
         'unlockedBadges': _unlockedBadges,
         'recentAchievements': _recentAchievements,
@@ -639,12 +712,15 @@ class _HomeScreenState extends State<HomeScreen> {
         filesByFolder: _filesByFolder,
         selectedFolderId: _selectedFolder?.id,
         collapsed: _collapsed,
-        onDashboardTap:
-            () => setState(() {
-              _showDashboard = true;
-              _selectedFolder = null;
-              _previewFile = null;
-            }),
+        onDashboardTap: () {
+          // Backup progress when opening dashboard
+          _backupAllProgressData();
+          setState(() {
+            _showDashboard = true;
+            _selectedFolder = null;
+            _previewFile = null;
+          });
+        },
         onCreateFolder: _createFolderDialog,
         onUploadFile: _pickFiles,
         onToggleFolder:
@@ -698,6 +774,32 @@ class _HomeScreenState extends State<HomeScreen> {
           dailyActivity: _dailyActivity,
           unlockedBadges: _unlockedBadges,
           recentAchievements: _recentAchievements,
+          userName: _userName,
+          onBackPressed: () {
+            setState(() {
+              _showDashboard = false;
+            });
+          },
+          onUploadFiles: () {
+            setState(() {
+              _showDashboard = false;
+            });
+            _pickFiles();
+          },
+          onGenerateQuiz: () {
+            setState(() {
+              _showDashboard = false;
+            });
+            _snack('Quiz generation feature coming soon!');
+          },
+          onAIInteraction: () {
+            setState(() {
+              _showDashboard = false;
+            });
+            _snack(
+              'AI Assistant: Ask questions about your files in the file preview pane',
+            );
+          },
         );
       } else if (_previewFile != null) {
         content = MainPane(
@@ -709,6 +811,7 @@ class _HomeScreenState extends State<HomeScreen> {
           previewFile: _previewFile,
           onSelectFile: (file) => setState(() => _previewFile = file),
           onDeleteFile: _handleDeleteFile,
+          onAIInteractionSuccess: onAIInteractionSuccess,
         );
       } else if (_selectedFolder != null) {
         content = MainPane(
@@ -720,6 +823,7 @@ class _HomeScreenState extends State<HomeScreen> {
           previewFile: _previewFile,
           onSelectFile: (file) => setState(() => _previewFile = file),
           onDeleteFile: _handleDeleteFile,
+          onAIInteractionSuccess: onAIInteractionSuccess,
         );
       } else {
         // Show welcome/upload screen (no folder or file selected)
@@ -732,6 +836,7 @@ class _HomeScreenState extends State<HomeScreen> {
           previewFile: null,
           onSelectFile: (file) => setState(() => _previewFile = file),
           onDeleteFile: _handleDeleteFile,
+          onAIInteractionSuccess: onAIInteractionSuccess,
         );
       }
 
@@ -749,7 +854,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         Expanded(child: content),
                       ],
                     ),
-            floatingActionButton: _showDashboard ? null : _buildDemoButtons(),
+            floatingActionButton: null, // Removed demo buttons
           ),
           // Loading overlay
           if (_isLoading || _isUploading)
@@ -791,38 +896,6 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     },
   );
-
-  /* ── Demo Feature Buttons ────────────────────────────────── */
-  Widget _buildDemoButtons() {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        FloatingActionButton.extended(
-          heroTag: "ai_demo",
-          onPressed: _handleAiInteraction,
-          backgroundColor: Colors.purple,
-          icon: const Icon(Icons.smart_toy),
-          label: const Text('AI Chat'),
-        ),
-        const SizedBox(height: 10),
-        FloatingActionButton.extended(
-          heroTag: "quiz_correct",
-          onPressed: () => _handleQuizAnswer(true),
-          backgroundColor: Colors.green,
-          icon: const Icon(Icons.check),
-          label: const Text('Correct'),
-        ),
-        const SizedBox(height: 10),
-        FloatingActionButton.extended(
-          heroTag: "quiz_wrong",
-          onPressed: () => _handleQuizAnswer(false),
-          backgroundColor: Colors.orange,
-          icon: const Icon(Icons.close),
-          label: const Text('Wrong'),
-        ),
-      ],
-    );
-  }
 
   /* ── folder creation dialog ───────────────────────────────── */
   void _createFolderDialog() {

@@ -36,6 +36,7 @@ class MainPane extends StatelessWidget {
     this.previewFile,
     this.onSelectFile,
     this.onDeleteFile,
+    this.onAIInteractionSuccess,
   });
 
   final Folder? selectedFolder;
@@ -47,6 +48,7 @@ class MainPane extends StatelessWidget {
   final void Function(FileMeta? file)?
   onSelectFile; // Add file selection callback
   final void Function(FileMeta file)? onDeleteFile;
+  final VoidCallback? onAIInteractionSuccess; // Add AI interaction callback
 
   @override
   Widget build(BuildContext context) {
@@ -152,6 +154,7 @@ class MainPane extends StatelessWidget {
                               fileName: previewFile!.name,
                               fileType: previewFile!.type,
                               fileContent: snapshot.data ?? '',
+                              onInteractionSuccess: onAIInteractionSuccess,
                             )),
               ),
             ],

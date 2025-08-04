@@ -9,12 +9,14 @@ class AIChatWidget extends StatefulWidget {
   final String fileName;
   final String fileType;
   final String fileContent;
+  final VoidCallback? onInteractionSuccess;
 
   const AIChatWidget({
     super.key,
     required this.fileName,
     required this.fileType,
     required this.fileContent,
+    this.onInteractionSuccess,
   });
 
   @override
@@ -120,6 +122,8 @@ class _AIChatWidgetState extends State<AIChatWidget> {
               timestamp: DateTime.now(),
             ),
           );
+          // Call the success callback to award points
+          widget.onInteractionSuccess?.call();
         } else {
           _errorMessage = response.message;
 

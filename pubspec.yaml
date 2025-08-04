@@ -57,6 +57,7 @@ dependencies:
   read_pdf_text: ^0.3.1
   path_provider: ^2.1.2
   flutter_dotenv: ^5.1.0
+  fl_chart: ^0.66.2  # For advanced charts and analytics
 
   # Needed by Firebase‑web; fixes the PromiseJsImpl symbol.
   js: ^0.7.2
