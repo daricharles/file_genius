@@ -252,6 +252,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final currentDate =
         '${_getOrdinalSuffix(now.day)} ${monthNames[now.month - 1]} ${now.year}';
 
+    // Get current user data from Firebase Auth (same as sidebar)
+    final user = FirebaseAuth.instance.currentUser;
+    final displayName = user?.displayName;
+    final email = user?.email;
+    final userName = displayName ?? email ?? 'User';
+
     return Column(
       children: [
         // Dashboard title row
@@ -293,7 +299,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Welcome! ${widget.userName}',
+                    'Welcome, $userName!',
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
