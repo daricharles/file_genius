@@ -144,6 +144,14 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       message: userMessage,
     );
 
+    // Refresh current session reference to get updated state
+    _currentSession = await _conversationManager.getOrCreateSession(
+      fileName: widget.fileName,
+      fileType: widget.fileType,
+      filePath: widget.filePath,
+      fileMetadata: widget.fileMetadata,
+    );
+
     // Update loading state once, avoiding multiple rebuilds
     setState(() {
       _isLoading = true;
@@ -190,6 +198,14 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
           message: aiMessage,
         );
 
+        // Refresh current session reference to get updated state
+        _currentSession = await _conversationManager.getOrCreateSession(
+          fileName: widget.fileName,
+          fileType: widget.fileType,
+          filePath: widget.filePath,
+          fileMetadata: widget.fileMetadata,
+        );
+
         // Call success callback
         widget.onInteractionSuccess?.call();
 
@@ -204,7 +220,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
           _isLoading = false;
           _aiTyping = false;
         });
-        _showErrorMessage(response.message);
+        await _showErrorMessage(response.message);
       }
     } catch (e) {
       _typingAnimationController.stop();
@@ -213,13 +229,13 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
         _isLoading = false;
         _aiTyping = false;
       });
-      _showErrorMessage('Failed to get response: ${e.toString()}');
+      await _showErrorMessage('Failed to get response: ${e.toString()}');
     }
 
     _scrollToBottom();
   }
 
-  void _showErrorMessage(String message) {
+  Future<void> _showErrorMessage(String message) async {
     final errorId = _uuid.v4();
     final errorMessage = EnhancedChatMessage(
       id: errorId,
@@ -231,9 +247,17 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       metadata: {'isError': true},
     );
 
-    _conversationManager.addMessage(
+    await _conversationManager.addMessage(
       sessionId: _currentSession!.id,
       message: errorMessage,
+    );
+
+    // Refresh current session reference to get updated state
+    _currentSession = await _conversationManager.getOrCreateSession(
+      fileName: widget.fileName,
+      fileType: widget.fileType,
+      filePath: widget.filePath,
+      fileMetadata: widget.fileMetadata,
     );
   }
 
@@ -252,8 +276,15 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   Future<void> _clearChat() async {
     if (_currentSession != null) {
       await _conversationManager.clearSession(_currentSession!.id);
+      // Refresh current session reference to get updated state
+      _currentSession = await _conversationManager.getOrCreateSession(
+        fileName: widget.fileName,
+        fileType: widget.fileType,
+        filePath: widget.filePath,
+        fileMetadata: widget.fileMetadata,
+      );
       setState(() {
-        // Session cleared, messages will be updated
+        // Trigger rebuild to show cleared chat
       });
     }
   }
@@ -307,7 +338,17 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
         updatedMessage: updatedMessage,
       );
 
-      setState(() {});
+      // Refresh current session reference to get updated state
+      _currentSession = await _conversationManager.getOrCreateSession(
+        fileName: widget.fileName,
+        fileType: widget.fileType,
+        filePath: widget.filePath,
+        fileMetadata: widget.fileMetadata,
+      );
+
+      setState(() {
+        // Trigger rebuild to show updated bookmark state
+      });
     }
   }
 

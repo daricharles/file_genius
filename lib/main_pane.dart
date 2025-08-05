@@ -151,6 +151,7 @@ class MainPane extends StatelessWidget {
                         : (snapshot.connectionState == ConnectionState.waiting
                             ? const Center(child: CircularProgressIndicator())
                             : EnhancedAIChatWidget(
+                              key: ValueKey('ai_chat_${previewFile!.id}'),
                               fileName: previewFile!.name,
                               fileType: previewFile!.type,
                               fileContent: snapshot.data ?? '',
