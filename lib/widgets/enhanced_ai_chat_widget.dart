@@ -96,6 +96,24 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   }
 
   Future<void> _initializeChat() async {
+    await _loadChatSession();
+  }
+
+  @override
+  void didUpdateWidget(EnhancedAIChatWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.filePath != oldWidget.filePath) {
+      // If the file path has changed, we need to re-initialize the chat.
+      // We set initializing to true to show a loading indicator.
+      setState(() {
+        _isInitializing = true;
+      });
+      // We then load the new chat session.
+      _loadChatSession();
+    }
+  }
+
+  Future<void> _loadChatSession() async {
     try {
       await _conversationManager.initialize();
 
@@ -106,13 +124,25 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
         fileMetadata: widget.fileMetadata,
       );
 
+      if (!mounted) return;
+
+      // Set state to false to trigger a rebuild with the new chat session.
       setState(() {
         _isInitializing = false;
+      });
+
+      // After the UI has been rebuilt with the new messages, scroll to the bottom.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _scrollToBottom(isInitialScroll: true);
+        }
       });
     } catch (e) {
-      setState(() {
-        _isInitializing = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isInitializing = false;
+        });
+      }
       debugPrint('Failed to initialize chat: $e');
     }
   }
@@ -138,22 +168,9 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       messageType: messageType ?? 'question',
     );
 
-    // Add user message to session
-    await _conversationManager.addMessage(
-      sessionId: _currentSession!.id,
-      message: userMessage,
-    );
-
-    // Refresh current session reference to get updated state
-    _currentSession = await _conversationManager.getOrCreateSession(
-      fileName: widget.fileName,
-      fileType: widget.fileType,
-      filePath: widget.filePath,
-      fileMetadata: widget.fileMetadata,
-    );
-
-    // Update loading state once, avoiding multiple rebuilds
+    // Add user message to UI immediately and update loading state
     setState(() {
+      _currentSession!.messages.add(userMessage);
       _isLoading = true;
       _aiTyping = true;
     });
@@ -161,6 +178,12 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     _typingAnimationController.repeat();
     _questionController.clear();
     _scrollToBottom();
+
+    // Add user message to session in the background
+    await _conversationManager.addMessage(
+      sessionId: _currentSession!.id,
+      message: userMessage,
+    );
 
     try {
       // Get conversation context for better AI responses
@@ -193,42 +216,28 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
           },
         );
 
+        // Add AI response to UI and update loading state
+        setState(() {
+          _currentSession!.messages.add(aiMessage);
+          _isLoading = false;
+          _aiTyping = false;
+        });
+
+        // Add AI message to session in the background
         await _conversationManager.addMessage(
           sessionId: _currentSession!.id,
           message: aiMessage,
         );
 
-        // Refresh current session reference to get updated state
-        _currentSession = await _conversationManager.getOrCreateSession(
-          fileName: widget.fileName,
-          fileType: widget.fileType,
-          filePath: widget.filePath,
-          fileMetadata: widget.fileMetadata,
-        );
-
         // Call success callback
         widget.onInteractionSuccess?.call();
-
-        // Update state once with all changes
-        setState(() {
-          _isLoading = false;
-          _aiTyping = false;
-        });
       } else {
         // Handle error state
-        setState(() {
-          _isLoading = false;
-          _aiTyping = false;
-        });
         await _showErrorMessage(response.message);
       }
     } catch (e) {
       _typingAnimationController.stop();
       // Handle error state
-      setState(() {
-        _isLoading = false;
-        _aiTyping = false;
-      });
       await _showErrorMessage('Failed to get response: ${e.toString()}');
     }
 
@@ -247,29 +256,40 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       metadata: {'isError': true},
     );
 
+    setState(() {
+      _currentSession!.messages.add(errorMessage);
+      _isLoading = false;
+      _aiTyping = false;
+    });
+
     await _conversationManager.addMessage(
       sessionId: _currentSession!.id,
       message: errorMessage,
     );
-
-    // Refresh current session reference to get updated state
-    _currentSession = await _conversationManager.getOrCreateSession(
-      fileName: widget.fileName,
-      fileType: widget.fileType,
-      filePath: widget.filePath,
-      fileMetadata: widget.fileMetadata,
-    );
   }
 
-  void _scrollToBottom() {
+  void _scrollToBottom({bool isInitialScroll = false}) {
+    // We use a post-frame callback to ensure that the scroll controller has
+    // updated its scroll extents after the new message has been added to the list.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
+      // A small delay is added to give the UI time to render the new message
+      // before attempting to scroll. This helps prevent race conditions where
+      // the scroll happens before the UI has fully updated.
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (_scrollController.hasClients) {
+          if (isInitialScroll) {
+            _scrollController.jumpTo(
+              _scrollController.position.maxScrollExtent,
+            );
+          } else {
+            _scrollController.animateTo(
+              _scrollController.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOut,
+            );
+          }
+        }
+      });
     });
   }
 

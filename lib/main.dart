@@ -589,9 +589,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _incrementAiChatInteraction() {
-    setState(() {
-      _aiChatInteractions++;
-    });
+    _aiChatInteractions++;
     // Immediate persistence
     _updateBadgeProgress({'aiChatInteractions': _aiChatInteractions});
     _calculatePoints('ai_chat');
@@ -622,9 +620,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         break;
     }
 
-    setState(() {
-      _totalPoints += points;
-    });
+    _totalPoints += points;
 
     // Immediate persistence of points
     _updateBadgeProgress({'totalPoints': _totalPoints});
