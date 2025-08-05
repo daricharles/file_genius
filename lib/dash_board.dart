@@ -510,7 +510,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  '$unlockedCount/${badges.length}',
+                  '$unlockedCount / ${badges.length} unlocked',
                   style: TextStyle(color: kBrand, fontWeight: FontWeight.w600),
                 ),
               ),
@@ -1867,7 +1867,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'unlocked':
             widget.unlockedBadges.contains('first_file') ||
             widget.filesUploaded >= 1,
-        'description': 'Upload your first file ($widget.filesUploaded/1)',
+        'description': 'Upload your first file (${widget.filesUploaded}/1)',
       },
       {
         'icon': Icons.folder,
@@ -1875,7 +1875,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'unlocked':
             widget.unlockedBadges.contains('file_master') ||
             widget.filesUploaded >= 10,
-        'description': 'Upload 10 files ($widget.filesUploaded/10)',
+        'description': 'Upload 10 files (${widget.filesUploaded}/10)',
       },
       {
         'icon': Icons.workspace_premium,
@@ -1883,7 +1883,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'unlocked':
             widget.unlockedBadges.contains('file_expert') ||
             widget.filesUploaded >= 50,
-        'description': 'Upload 50 files ($widget.filesUploaded/50)',
+        'description': 'Upload 50 files (${widget.filesUploaded}/50)',
       },
       {
         'icon': Icons.emoji_events,
@@ -1891,7 +1891,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'unlocked':
             widget.unlockedBadges.contains('week_warrior') ||
             widget.loginDays >= 7,
-        'description': 'Login for 7 consecutive days ($widget.loginDays/7)',
+        'description':
+            'Login for 7 consecutive days (${widget.filesUploaded}/7)',
       },
       {
         'icon': Icons.stars,
@@ -1899,7 +1900,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'unlocked':
             widget.unlockedBadges.contains('month_master') ||
             widget.loginDays >= 30,
-        'description': 'Login for 30 consecutive days ($widget.loginDays/30)',
+        'description':
+            'Login for 30 consecutive days (${widget.filesUploaded}/30)',
       },
       {
         'icon': Icons.smart_toy,
@@ -1907,7 +1909,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'unlocked':
             widget.unlockedBadges.contains('ai_explorer') ||
             widget.aiChatInteractions >= 5,
-        'description': 'Use AI chat 5 times ($widget.aiChatInteractions/5)',
+        'description': 'Use AI chat 5 times (${widget.aiChatInteractions}/5)',
       },
       {
         'icon': Icons.quiz,
@@ -1916,7 +1918,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             widget.unlockedBadges.contains('quiz_master') ||
             widget.correctAnswers >= 20,
         'description':
-            'Answer 20 questions correctly ($widget.correctAnswers/20)',
+            'Answer 20 questions correctly (${widget.correctAnswers}/20)',
       },
       {
         'icon': Icons.military_tech,
@@ -1924,7 +1926,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'unlocked':
             widget.unlockedBadges.contains('century_club') ||
             widget.totalPoints >= 100,
-        'description': 'Earn 100 XP ($widget.totalPoints/100)',
+        'description': 'Earn 100 XP (${widget.totalPoints}/100)',
       },
       {
         'icon': Icons.diamond,
@@ -1932,7 +1934,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'unlocked':
             widget.unlockedBadges.contains('point_prodigy') ||
             widget.totalPoints >= 500,
-        'description': 'Earn 500 XP ($widget.totalPoints/500)',
+        'description': 'Earn 500 XP (${widget.totalPoints}/500)',
       },
       {
         'icon': Icons.school,
@@ -1940,7 +1942,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'unlocked':
             widget.unlockedBadges.contains('scholar') ||
             widget.questionsAnswered >= 100,
-        'description': 'Answer 100 questions ($widget.questionsAnswered/100)',
+        'description': 'Answer 100 questions (${widget.questionsAnswered}/100)',
       },
       {
         'icon': Icons.psychology,
@@ -1948,7 +1950,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'unlocked':
             widget.unlockedBadges.contains('genius') ||
             widget.correctAnswers >= 50,
-        'description': 'Get 50 correct answers ($widget.correctAnswers/50)',
+        'description': 'Get 50 correct answers (${widget.correctAnswers}/50)',
       },
       {
         'icon': Icons.auto_awesome,
@@ -1956,7 +1958,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         'unlocked':
             widget.unlockedBadges.contains('legendary') ||
             widget.totalPoints >= 1000,
-        'description': 'Reach 1000 XP ($widget.totalPoints/1000)',
+        'description': 'Reach 1000 XP (${widget.totalPoints}/1000)',
       },
     ];
   }

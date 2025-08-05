@@ -177,7 +177,11 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
 
     _typingAnimationController.repeat();
     _questionController.clear();
-    _scrollToBottom();
+
+    // Scroll to bottom after the user message is added
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToBottom();
+    });
 
     // Add user message to session in the background
     await _conversationManager.addMessage(
@@ -231,6 +235,11 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
 
         // Call success callback
         widget.onInteractionSuccess?.call();
+
+        // Scroll to bottom after AI response is added
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scrollToBottom();
+        });
       } else {
         // Handle error state
         await _showErrorMessage(response.message);
@@ -240,8 +249,6 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       // Handle error state
       await _showErrorMessage('Failed to get response: ${e.toString()}');
     }
-
-    _scrollToBottom();
   }
 
   Future<void> _showErrorMessage(String message) async {
@@ -266,31 +273,67 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       sessionId: _currentSession!.id,
       message: errorMessage,
     );
+
+    // Scroll to bottom after error message is added
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToBottom();
+    });
   }
 
   void _scrollToBottom({bool isInitialScroll = false}) {
-    // We use a post-frame callback to ensure that the scroll controller has
-    // updated its scroll extents after the new message has been added to the list.
+    // Use post-frame callback to ensure the UI has been updated
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // A small delay is added to give the UI time to render the new message
-      // before attempting to scroll. This helps prevent race conditions where
-      // the scroll happens before the UI has fully updated.
-      Future.delayed(const Duration(milliseconds: 100), () {
-        if (_scrollController.hasClients) {
-          if (isInitialScroll) {
-            _scrollController.jumpTo(
-              _scrollController.position.maxScrollExtent,
-            );
-          } else {
-            _scrollController.animateTo(
-              _scrollController.position.maxScrollExtent,
-              duration: const Duration(milliseconds: 300),
-              curve: Curves.easeOut,
-            );
-          }
-        }
-      });
+      _performScrollToBottom(isInitialScroll: isInitialScroll);
     });
+  }
+
+  void _performScrollToBottom({
+    bool isInitialScroll = false,
+    int retryCount = 0,
+  }) {
+    if (!_scrollController.hasClients) return;
+
+    // Get the current max extent
+    final currentMaxExtent = _scrollController.position.maxScrollExtent;
+    final currentPosition = _scrollController.position.pixels;
+
+    // If we're already at the bottom or this is the first message, no need to scroll
+    if (currentMaxExtent == 0 || (currentPosition >= currentMaxExtent - 10)) {
+      return;
+    }
+
+    if (isInitialScroll) {
+      // For initial scroll, jump directly
+      _scrollController.jumpTo(currentMaxExtent);
+    } else {
+      // For new messages, animate to bottom
+      _scrollController
+          .animateTo(
+            currentMaxExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          )
+          .then((_) {
+            // Double-check if we actually reached the bottom after animation
+            // Sometimes the maxScrollExtent changes during animation due to text rendering
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_scrollController.hasClients) {
+                final newMaxExtent = _scrollController.position.maxScrollExtent;
+                final newPosition = _scrollController.position.pixels;
+
+                // If we're not at the bottom and the content has grown, scroll again
+                if (newPosition < newMaxExtent - 10 && retryCount < 2) {
+                  Future.delayed(const Duration(milliseconds: 50), () {
+                    _performScrollToBottom(
+                      isInitialScroll: false,
+                      retryCount: retryCount + 1,
+                    );
+                  });
+                }
+              }
+            });
+          });
+    }
   }
 
   Future<void> _clearChat() async {
