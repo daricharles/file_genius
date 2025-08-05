@@ -144,18 +144,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       // In a production app, you'd need a separate leaderboard collection
       // that all users can read but only cloud functions can write to
 
-      final currentUserData =
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(currentUserId)
-              .collection('settings')
-              .doc('badge_progress')
-              .get();
-
-      if (!currentUserData.exists) return [];
-
-      final data = currentUserData.data()!;
-      final currentUserPoints = data['widget.totalPoints'] ?? 0;
+      // Get current user's actual points from the widget
+      final currentUserPoints = widget.totalPoints;
 
       // Get the current user's display name
       String displayName = 'You';
@@ -794,7 +784,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 12),
           Text(
-            '$widget.loginDays Day Streak',
+            '${widget.loginDays} Day Streak',
             style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),

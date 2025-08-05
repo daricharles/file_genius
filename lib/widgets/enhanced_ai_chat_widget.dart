@@ -885,24 +885,27 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
             ),
           ),
           const SizedBox(width: 8),
-          IconButton(
-            onPressed:
-                _isLoading || _questionController.text.trim().isEmpty
-                    ? null
-                    : () => _sendMessage(),
-            icon: Icon(
-              Icons.send,
-              color:
-                  _isLoading || _questionController.text.trim().isEmpty
-                      ? Colors.grey
-                      : Theme.of(context).primaryColor,
-            ),
-            style: IconButton.styleFrom(
-              backgroundColor:
-                  _isLoading || _questionController.text.trim().isEmpty
-                      ? Colors.grey[200]
-                      : Theme.of(context).primaryColor.withOpacity(0.1),
-            ),
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: _questionController,
+            builder: (context, value, child) {
+              final hasText = value.text.trim().isNotEmpty;
+              return IconButton(
+                onPressed: _isLoading || !hasText ? null : () => _sendMessage(),
+                icon: Icon(
+                  Icons.send,
+                  color:
+                      _isLoading || !hasText
+                          ? Colors.grey
+                          : Theme.of(context).primaryColor,
+                ),
+                style: IconButton.styleFrom(
+                  backgroundColor:
+                      _isLoading || !hasText
+                          ? Colors.grey[200]
+                          : Theme.of(context).primaryColor.withOpacity(0.1),
+                ),
+              );
+            },
           ),
         ],
       ),
