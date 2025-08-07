@@ -12,7 +12,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:intl/intl.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // Firebase
 import 'package:firebase_core/firebase_core.dart';
@@ -190,8 +191,21 @@ Future<void> _safeSet(DocumentReference ref, Map<String, dynamic> data) async {
   }
 }
 
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+Future<void> _initNotifications() async {
+  const AndroidInitializationSettings initializationSettingsAndroid =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+  const InitializationSettings initializationSettings = InitializationSettings(
+    android: initializationSettingsAndroid,
+  );
+  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await _initNotifications();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await dotenv.load();
 
@@ -283,6 +297,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Periodic backup timer
   Timer? _backupTimer;
 
+  // Last activity tracking
+  DateTime? _lastActivityTime;
+
+  // Timer? _inactivityTimer; // Add this field to your state class:
+
+  // Add this field to your state class:
+  final List<int> _streakMilestones = [3, 7, 14, 30, 100];
+
   /* ── life‑cycle ───────────────────────────────────────────── */
   @override
   void initState() {
@@ -298,6 +320,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       const Duration(minutes: 5),
       (timer) => _backupAllProgressData(),
     );
+
+    _startInactivityMonitor();
   }
 
   @override
@@ -306,6 +330,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _backupTimer?.cancel();
     _foldersSubscription?.cancel();
     _topLevelFilesSubscription?.cancel();
+    _inactivityTimer?.cancel(); // <-- Uncomment this line
     for (final s in _folderSubs) {
       s.cancel();
     }
@@ -499,6 +524,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void onAIInteractionSuccess() {
+    _updateLastActivity(); // <-- Add this line
     setState(() {
       _aiChatInteractions++;
       _totalPoints += 5; // 5 points per AI interaction
@@ -508,14 +534,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _saveUserData();
   }
 
-  void _trackDailyActivity() {
-    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    setState(() {
-      _dailyActivity[today] = (_dailyActivity[today] ?? 0) + 1;
-    });
-  }
-
   void _onFileUploadSuccess(FileMeta file) {
+    _updateLastActivity(); // <-- Add this line
     // Update file type statistics
     final fileType = file.type.toLowerCase();
     setState(() {
@@ -534,10 +554,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _saveUserData();
   }
 
+  void onQuizAnswerSubmitted(bool isCorrect) {
+    _updateLastActivity(); // <-- Add this line
+    setState(() {
+      _questionsAnswered++;
+      if (isCorrect) {
+        _correctAnswers++;
+        _totalPoints += 15; // 15 points for correct answer
+      } else {
+        _totalPoints += 2; // 2 points for attempt
+      }
+    });
+
+    _trackDailyActivity();
+    _checkForNewAchievements();
+    _saveUserData();
+  }
+
   // Ensure consistent login day tracking
   Future<void> _trackLoginDay() async {
     if (_user == null) return;
-    // Wait a moment for _loadUserData to complete if it hasn't already
     await Future.delayed(const Duration(seconds: 1));
 
     final now = DateTime.now();
@@ -552,29 +588,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final difference = today.difference(lastLoginDay).inDays;
 
       if (difference == 1) {
-        // Consecutive day
         setState(() {
           _loginDays++;
           _totalPoints += 5; // Daily login reward
         });
         _checkForNewAchievements();
+        if (_loginDays % 3 == 0) {
+          // Notify every 3-day streak as an example
+          _showStreakNotification(_loginDays);
+        }
       } else if (difference > 1) {
-        // Streak broken
         setState(() {
-          _loginDays = 1; // Reset to 1 for the new login
-          _totalPoints += 5; // Still give points for logging in
+          _loginDays = 1;
+          _totalPoints += 5;
         });
       }
-      // If difference is 0, do nothing (already logged in today)
+      // If difference is 0, do nothing
     } else {
-      // First login ever
       setState(() {
         _loginDays = 1;
-        _totalPoints += 5; // First login reward
+        _totalPoints += 5;
       });
     }
 
-    // Update the last login date and save all data
+    // New code for streak milestones
+    if (_streakMilestones.contains(_loginDays)) {
+      _showStreakNotification(_loginDays);
+    }
+
     _lastLoginDate = now;
     await _saveUserData();
   }
@@ -675,6 +716,72 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Updates the last activity timestamp.
+  void _updateLastActivity() async {
+    _lastActivityTime = DateTime.now();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('lastActivity', _lastActivityTime!.toIso8601String());
+    _startInactivityMonitor(); // Restart the inactivity monitor
+  }
+
+  Timer? _inactivityTimer;
+
+  void _startInactivityMonitor() {
+    _inactivityTimer?.cancel(); // Cancel previous timer if any
+    _inactivityTimer = Timer.periodic(const Duration(minutes: 10), (
+      timer,
+    ) async {
+      final prefs = await SharedPreferences.getInstance();
+      final lastActivityStr = prefs.getString('lastActivity');
+      if (lastActivityStr == null) return;
+      final lastActivity = DateTime.parse(lastActivityStr);
+      final now = DateTime.now();
+      if (now.difference(lastActivity).inMinutes >= 120) {
+        _showStudyReminderNotification();
+        timer.cancel(); // Only notify once until next activity
+        _inactivityTimer = null;
+      }
+    });
+  }
+
+  Future<void> _showStudyReminderNotification() async {
+    const AndroidNotificationDetails androidPlatformChannelSpecifics =
+        AndroidNotificationDetails(
+          'study_reminder_channel',
+          'Study Reminders',
+          channelDescription: 'Reminders to reinforce learning',
+          importance: Importance.max,
+          priority: Priority.high,
+          showWhen: false,
+        );
+    const NotificationDetails platformChannelSpecifics = NotificationDetails(
+      android: androidPlatformChannelSpecifics,
+    );
+    await flutterLocalNotificationsPlugin.show(
+      0,
+      'Time to Study!',
+      'You haven\'t been active for a while. Let\'s reinforce your learning!',
+      platformChannelSpecifics,
+    );
+  }
+
+  Future<void> _showStreakNotification(int streakDays) async {
+    await flutterLocalNotificationsPlugin.show(
+      1,
+      'Streak Alert!',
+      'You\'re on a $streakDays-day learning streak! Keep going for more rewards!',
+      const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'streak_channel',
+          'Streak Notifications',
+          channelDescription: 'Notifications for learning streaks',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (_, dims) {
@@ -737,19 +844,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       Widget content;
       if (_showDashboard) {
         content = DashboardScreen(
-          filesUploaded: _filesUploaded,
-          aiChatInteractions: _aiChatInteractions,
-          questionsAnswered: _questionsAnswered,
-          correctAnswers: _correctAnswers,
-          loginDays: _loginDays,
-          totalPoints: _totalPoints,
-          weeklyUploads: _weeklyUploads,
-          monthlyUploads: _monthlyUploads,
-          fileTypeStats: _fileTypeStats,
-          dailyActivity: _dailyActivity,
-          unlockedBadges: _unlockedBadges,
-          recentAchievements: _recentAchievements,
-          userName: _userName,
+          userId: _user!.uid,
           onBackPressed: () {
             setState(() {
               _showDashboard = false;
@@ -1044,7 +1139,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       'uploadedAt': FieldValue.serverTimestamp(),
       'folderId': folderId,
     });
-  
+
     final result = FileMeta(
       id: doc.id,
       name: pFile.name,
@@ -1054,7 +1149,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       uploadedAt: DateTime.now(),
       folderId: folderId,
     );
-  
+
     // Track badge progress
     _onFileUploadSuccess(result);
 
@@ -1449,20 +1544,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  // Track quiz answer
-  void onQuizAnswerSubmitted(bool isCorrect) {
+  void _trackDailyActivity() {
+    final today = DateTime.now();
+    final key = '${today.year}-${today.month}-${today.day}';
     setState(() {
-      _questionsAnswered++;
-      if (isCorrect) {
-        _correctAnswers++;
-        _totalPoints += 15; // 15 points for correct answer
-      } else {
-        _totalPoints += 2; // 2 points for attempt
-      }
+      _dailyActivity[key] = (_dailyActivity[key] ?? 0) + 1;
     });
-
-    _trackDailyActivity();
-    _checkForNewAchievements();
-    _saveUserData();
   }
 }

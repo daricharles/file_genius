@@ -5,6 +5,7 @@
         "buildlog",
         "cand",
         "Cupertino",
+        "dotenv",
         "filegenius",
         "firestore",
         "foldered",
@@ -13,6 +14,7 @@
         "Mercier",
         "metas",
         "officeparser",
+        "pdfviewer",
         "pdfx",
         "prefs",
         "Schyler",
@@ -21,6 +23,7 @@
         "subcollections",
         "swiftpm",
         "Symbolication",
+        "syncfusion",
         "Uncategorised",
         "Unser"
     ]

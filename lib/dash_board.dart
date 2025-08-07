@@ -1,35 +1,16 @@
 // ignore_for_file: deprecated_member_use, use_super_parameters
 
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart'; // Import Firestore
 import 'constants.dart';
 import 'screens/chat_sessions_screen.dart';
 
 /// Comprehensive Dashboard with Gamification & Analytics
 class DashboardScreen extends StatefulWidget {
-  final int filesUploaded;
-  final int aiChatInteractions;
-  final int questionsAnswered;
-  final int correctAnswers;
-  final int loginDays;
-  final int totalPoints;
-  final int weeklyUploads;
-  final int monthlyUploads;
-  final Map<String, int> fileTypeStats;
-  final Map<String, int> dailyActivity;
-  final List<String> unlockedBadges;
-  final List<String> recentAchievements;
-  final String userName;
-
-  // New Analytics Properties
-  final Map<String, double> studyTimeBySubject;
-  final List<Map<String, dynamic>> performanceHistory;
-  final Map<String, int> weeklyPerformance;
-  final List<String> weakAreas;
-  final List<Map<String, dynamic>> aiRecommendations;
-  final double totalStudyTime;
-  final double averageAccuracy;
-  final String preferredStudyTime;
-
+  final String userId;
   final VoidCallback? onBackPressed;
   final VoidCallback? onUploadFiles;
   final VoidCallback? onGenerateQuiz;
@@ -37,30 +18,7 @@ class DashboardScreen extends StatefulWidget {
 
   const DashboardScreen({
     super.key,
-    this.filesUploaded = 0,
-    this.aiChatInteractions = 0,
-    this.questionsAnswered = 0,
-    this.correctAnswers = 0,
-    this.loginDays = 0,
-    this.totalPoints = 0,
-    this.weeklyUploads = 0,
-    this.monthlyUploads = 0,
-    this.fileTypeStats = const {},
-    this.dailyActivity = const {},
-    this.unlockedBadges = const [],
-    this.recentAchievements = const [],
-    this.userName = 'User',
-
-    // Analytics Properties
-    this.studyTimeBySubject = const {},
-    this.performanceHistory = const [],
-    this.weeklyPerformance = const {},
-    this.weakAreas = const [],
-    this.aiRecommendations = const [],
-    this.totalStudyTime = 0.0,
-    this.averageAccuracy = 0.0,
-    this.preferredStudyTime = 'Morning',
-
+    required this.userId,
     this.onBackPressed,
     this.onUploadFiles,
     this.onGenerateQuiz,
@@ -72,65 +30,367 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  // Dashboard state
+  bool _isLoading = true;
+  bool _hasError = false;
+  String _errorMessage = '';
+
+  // User metrics
+  int _filesUploaded = 0;
+  int _aiChatInteractions = 0;
+  int _questionsAnswered = 0;
+  int _correctAnswers = 0;
+  int _loginDays = 0;
+  int _totalPoints = 0;
+  int _weeklyUploads = 0;
+  int _monthlyUploads = 0;
+  Map<String, int> _fileTypeStats = {};
+  Map<String, int> _dailyActivity = {};
+  List<String> _unlockedBadges = [];
+  List<String> _recentAchievements = [];
+  String _userName = 'User';
+
+  // Add Firestore instance
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
+  // Analytics data
+  Map<String, double> _studyTimeBySubject = {};
+  List<Map<String, dynamic>> _performanceHistory = [];
+  Map<String, int> _weeklyPerformance = {};
+  List<String> _weakAreas = [];
+  List<Map<String, dynamic>> _aiRecommendations = [];
+  double _totalStudyTime = 0.0;
+  double _averageAccuracy = 0.0;
+  String _preferredStudyTime = 'Morning';
+
+  // Timer for refresh
+  Timer? _refreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDashboardData();
+    // Set up periodic refresh every 5 minutes
+    _refreshTimer = Timer.periodic(const Duration(minutes: 5), (_) {
+      _loadDashboardData();
+    });
+  }
+
   @override
   void dispose() {
-    // Cancel any timers, subscriptions, etc.
-    // Example:
-    // _timer?.cancel();
-    // _subscription?.cancel();
+    _refreshTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _loadDashboardData() async {
+    if (!mounted) return; // Add early return check
+
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+    });
+
+    try {
+      // Try to load from cache first
+      await _loadFromCache();
+
+      // Check mounted before Firestore call
+      if (!mounted) return;
+
+      // Then fetch fresh data from Firestore
+      await _fetchFromFirestore();
+
+      // Check mounted before saving to cache
+      if (!mounted) return;
+
+      // Save the latest data to cache
+      await _saveToCache();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _hasError = true;
+          _errorMessage = 'Failed to load dashboard data: ${e.toString()}';
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _loadFromCache() async {
+    if (!mounted) return; // Add check at start
+
+    final prefs = await SharedPreferences.getInstance();
+
+    if (!mounted) return; // Check again after async operation
+
+    setState(() {
+      _filesUploaded = prefs.getInt('filesUploaded') ?? 0;
+      _aiChatInteractions = prefs.getInt('aiChatInteractions') ?? 0;
+      _questionsAnswered = prefs.getInt('questionsAnswered') ?? 0;
+      _correctAnswers = prefs.getInt('correctAnswers') ?? 0;
+      _loginDays = prefs.getInt('loginDays') ?? 0;
+      _totalPoints = prefs.getInt('totalPoints') ?? 0;
+      _weeklyUploads = prefs.getInt('weeklyUploads') ?? 0;
+      _monthlyUploads = prefs.getInt('monthlyUploads') ?? 0;
+      _userName = prefs.getString('userName') ?? 'User';
+      _totalStudyTime = prefs.getDouble('totalStudyTime') ?? 0.0;
+      _averageAccuracy = prefs.getDouble('averageAccuracy') ?? 0.0;
+      _preferredStudyTime = prefs.getString('preferredStudyTime') ?? 'Morning';
+
+      // Load maps/lists from JSON strings
+      _fileTypeStats = Map<String, int>.from(
+        jsonDecode(prefs.getString('fileTypeStats') ?? '{}'),
+      );
+      _dailyActivity = Map<String, int>.from(
+        jsonDecode(prefs.getString('dailyActivity') ?? '{}'),
+      );
+      _unlockedBadges = List<String>.from(
+        jsonDecode(prefs.getString('unlockedBadges') ?? '[]'),
+      );
+      _recentAchievements = List<String>.from(
+        jsonDecode(prefs.getString('recentAchievements') ?? '[]'),
+      );
+      _studyTimeBySubject = Map<String, double>.from(
+        jsonDecode(prefs.getString('studyTimeBySubject') ?? '{}'),
+      );
+      _weakAreas = List<String>.from(
+        jsonDecode(prefs.getString('weakAreas') ?? '[]'),
+      );
+    });
+  }
+
+  Future<void> _fetchFromFirestore() async {
+    if (!mounted) return; // Add check at start
+
+    // Document reference for the user's dashboard data
+    final docRef = _firestore.collection('dashboards').doc(widget.userId);
+    final snapshot = await docRef.get();
+
+    if (!mounted) return; // Check again after async operation
+
+    if (snapshot.exists) {
+      final data = snapshot.data() as Map<String, dynamic>;
+      setState(() {
+        _filesUploaded = data['filesUploaded'] ?? _filesUploaded;
+        _aiChatInteractions = data['aiChatInteractions'] ?? _aiChatInteractions;
+        _questionsAnswered = data['questionsAnswered'] ?? _questionsAnswered;
+        _correctAnswers = data['correctAnswers'] ?? _correctAnswers;
+        _loginDays = data['loginDays'] ?? _loginDays;
+        _totalPoints = data['totalPoints'] ?? _totalPoints;
+        _weeklyUploads = data['weeklyUploads'] ?? _weeklyUploads;
+        _monthlyUploads = data['monthlyUploads'] ?? _monthlyUploads;
+        _userName = data['userName'] ?? _userName;
+        _totalStudyTime =
+            (data['totalStudyTime'] ?? _totalStudyTime).toDouble();
+        _averageAccuracy =
+            (data['averageAccuracy'] ?? _averageAccuracy).toDouble();
+        _preferredStudyTime = data['preferredStudyTime'] ?? _preferredStudyTime;
+
+        // Update complex data structures
+        _fileTypeStats = Map<String, int>.from(
+          data['fileTypeStats'] ?? _fileTypeStats,
+        );
+        _dailyActivity = Map<String, int>.from(
+          data['dailyActivity'] ?? _dailyActivity,
+        );
+        _unlockedBadges = List<String>.from(
+          data['unlockedBadges'] ?? _unlockedBadges,
+        );
+        _recentAchievements = List<String>.from(
+          data['recentAchievements'] ?? _recentAchievements,
+        );
+        _studyTimeBySubject = Map<String, double>.from(
+          data['studyTimeBySubject'] ?? _studyTimeBySubject,
+        );
+        _weakAreas = List<String>.from(data['weakAreas'] ?? _weakAreas);
+        _performanceHistory = List<Map<String, dynamic>>.from(
+          data['performanceHistory'] ?? _performanceHistory,
+        );
+        _weeklyPerformance = Map<String, int>.from(
+          data['weeklyPerformance'] ?? _weeklyPerformance,
+        );
+        _aiRecommendations = List<Map<String, dynamic>>.from(
+          data['aiRecommendations'] ?? _aiRecommendations,
+        );
+      });
+    } else {
+      // If no data exists in Firestore, create an initial document.
+      // This is useful for new users.
+      if (mounted) {
+        await _saveToFirestore();
+      }
+    }
+  }
+
+  Future<void> _saveToCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('filesUploaded', _filesUploaded);
+    await prefs.setInt('aiChatInteractions', _aiChatInteractions);
+    await prefs.setInt('questionsAnswered', _questionsAnswered);
+    await prefs.setInt('correctAnswers', _correctAnswers);
+    await prefs.setInt('loginDays', _loginDays);
+    await prefs.setInt('totalPoints', _totalPoints);
+    await prefs.setInt('weeklyUploads', _weeklyUploads);
+    await prefs.setInt('monthlyUploads', _monthlyUploads);
+    await prefs.setString('userName', _userName);
+    await prefs.setDouble('totalStudyTime', _totalStudyTime);
+    await prefs.setDouble('averageAccuracy', _averageAccuracy);
+    await prefs.setString('preferredStudyTime', _preferredStudyTime);
+
+    // Save maps/lists as JSON strings
+    await prefs.setString('fileTypeStats', jsonEncode(_fileTypeStats));
+    await prefs.setString('dailyActivity', jsonEncode(_dailyActivity));
+    await prefs.setString('unlockedBadges', jsonEncode(_unlockedBadges));
+    await prefs.setString(
+      'recentAchievements',
+      jsonEncode(_recentAchievements),
+    );
+    await prefs.setString(
+      'studyTimeBySubject',
+      jsonEncode(_studyTimeBySubject),
+    );
+    await prefs.setString('weakAreas', jsonEncode(_weakAreas));
+  }
+
+  Future<void> _saveToFirestore() async {
+    final docRef = _firestore.collection('dashboards').doc(widget.userId);
+
+    final data = {
+      'filesUploaded': _filesUploaded,
+      'aiChatInteractions': _aiChatInteractions,
+      'questionsAnswered': _questionsAnswered,
+      'correctAnswers': _correctAnswers,
+      'loginDays': _loginDays,
+      'totalPoints': _totalPoints,
+      'weeklyUploads': _weeklyUploads,
+      'monthlyUploads': _monthlyUploads,
+      'userName': _userName,
+      'totalStudyTime': _totalStudyTime,
+      'averageAccuracy': _averageAccuracy,
+      'preferredStudyTime': _preferredStudyTime,
+      'fileTypeStats': _fileTypeStats,
+      'dailyActivity': _dailyActivity,
+      'unlockedBadges': _unlockedBadges,
+      'recentAchievements': _recentAchievements,
+      'studyTimeBySubject': _studyTimeBySubject,
+      'weakAreas': _weakAreas,
+      'performanceHistory': _performanceHistory,
+      'weeklyPerformance': _weeklyPerformance,
+      'aiRecommendations': _aiRecommendations,
+      'lastUpdated': FieldValue.serverTimestamp(),
+    };
+
+    // Use set with merge:true to create or update the document
+    await docRef.set(data, SetOptions(merge: true));
+  }
+
+  Future<void> _refreshData() async {
+    if (mounted) {
+      await _loadDashboardData();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildHeader(context),
-            const SizedBox(height: 32),
-            _buildUserLevelCard(),
-            const SizedBox(height: 24),
-            _buildMainMetrics(),
-            const SizedBox(height: 24),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: Column(
-                    children: [
-                      _buildBadgeSystem(),
-                      const SizedBox(height: 24),
-                      _buildActivityGraph(),
-                    ],
-                  ),
+      body: RefreshIndicator(
+        onRefresh: _refreshData,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (_isLoading) _buildLoadingIndicator(),
+              if (_hasError) _buildErrorWidget(),
+              if (!_isLoading && !_hasError) ...[
+                _buildHeader(context),
+                const SizedBox(height: 32),
+                _buildUserLevelCard(),
+                const SizedBox(height: 24),
+                _buildMainMetrics(),
+                const SizedBox(height: 24),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: Column(
+                        children: [
+                          _buildBadgeSystem(),
+                          const SizedBox(height: 24),
+                          _buildActivityGraph(),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 24),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          _buildStreakCard(),
+                          const SizedBox(height: 24),
+                          _buildQuickActions(),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 24),
-                Expanded(
-                  child: Column(
-                    children: [
-                      _buildStreakCard(),
-                      const SizedBox(height: 24),
-                      _buildQuickActions(),
-                    ],
-                  ),
-                ),
+                const SizedBox(height: 24),
+                _buildAnalyticsSection(),
+                const SizedBox(height: 24),
+                _buildRecentAchievements(),
+                const SizedBox(height: 24),
+                _buildDailyQuote(),
+                const SizedBox(height: 32),
+                _buildFooter(context),
               ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingIndicator() {
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.8,
+      child: const Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(kBrand),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorWidget() {
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.8,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, size: 48, color: Colors.red),
+            const SizedBox(height: 16),
+            Text(
+              _errorMessage,
+              style: const TextStyle(fontSize: 16),
+              textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 24),
-            // Enhanced Analytics Section
-            _buildAnalyticsSection(),
-            const SizedBox(height: 24),
-            // AI Recommendations Section removed
-            _buildRecentAchievements(),
-            const SizedBox(height: 24),
-            _buildDailyQuote(),
-            const SizedBox(height: 32),
-            _buildFooter(context),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _refreshData,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kBrand,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Retry'),
+            ),
           ],
         ),
       ),
@@ -209,7 +469,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Welcome, ${widget.userName}!',
+                    'Welcome, $_userName!',
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
@@ -259,7 +519,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const Icon(Icons.stars, color: Colors.white, size: 20),
                   const SizedBox(width: 8),
                   Text(
-                    '${widget.totalPoints} XP',
+                    '$_totalPoints XP',
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
@@ -292,9 +552,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildUserLevelCard() {
-    final currentLevel = (widget.totalPoints / 100).floor() + 1;
+    final currentLevel = (_totalPoints / 100).floor() + 1;
     final nextLevelPoints = currentLevel * 100;
-    final progressToNext = (widget.totalPoints % 100) / 100;
+    final progressToNext = (_totalPoints % 100) / 100;
 
     return Container(
       padding: const EdgeInsets.all(24),
@@ -343,7 +603,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '${nextLevelPoints - widget.totalPoints} XP to Level ${currentLevel + 1}',
+                  '${nextLevelPoints - _totalPoints} XP to Level ${currentLevel + 1}',
                   style: TextStyle(color: Colors.grey[600]),
                 ),
                 const SizedBox(height: 12),
@@ -370,27 +630,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
         Expanded(
           child: _buildMetricCard(
             'Files Uploaded',
-            widget.filesUploaded.toString(),
+            _filesUploaded.toString(),
             Icons.cloud_upload,
             Colors.blue,
-            '+${widget.weeklyUploads} this week',
+            '+$_weeklyUploads this week',
           ),
         ),
         const SizedBox(width: 16),
         Expanded(
           child: _buildMetricCard(
             'Questions Answered',
-            widget.questionsAnswered.toString(),
+            _questionsAnswered.toString(),
             Icons.quiz,
             Colors.green,
-            '${widget.correctAnswers > 0 ? ((widget.correctAnswers / widget.questionsAnswered) * 100).toInt() : 0}% accuracy',
+            '${_correctAnswers > 0 ? ((_correctAnswers / _questionsAnswered) * 100).toInt() : 0}% accuracy',
           ),
         ),
         const SizedBox(width: 16),
         Expanded(
           child: _buildMetricCard(
             'AI Interactions',
-            widget.aiChatInteractions.toString(),
+            _aiChatInteractions.toString(),
             Icons.smart_toy,
             Colors.purple,
             'Explore more!',
@@ -400,7 +660,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         Expanded(
           child: _buildMetricCard(
             'Login Streak',
-            '${widget.loginDays} days',
+            '$_loginDays days',
             Icons.local_fire_department,
             Colors.orange,
             'Keep it up!',
@@ -475,7 +735,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         badges.where((badge) => badge['unlocked'] as bool).length;
 
     return Container(
-      padding: const EdgeInsets.all(20), // Reduced from 24
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
@@ -494,42 +754,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               const Text(
                 'Achievement Badges',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ), // Reduced from 20
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 10, // Reduced from 12
-                  vertical: 4, // Reduced from 6
+                  horizontal: 10,
+                  vertical: 4,
                 ),
                 decoration: BoxDecoration(
                   color: kBrand.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(16), // Reduced from 20
+                  borderRadius: BorderRadius.circular(16),
                 ),
                 child: Text(
                   '$unlockedCount / ${badges.length}',
                   style: TextStyle(
                     color: kBrand,
                     fontWeight: FontWeight.w600,
-                    fontSize: 12, // Added smaller font size
+                    fontSize: 12,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 12), // Reduced from 16
+          const SizedBox(height: 12),
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount:
-                  6, // Increased from 4 to fit more badges in less height
-              crossAxisSpacing: 8, // Reduced from 12
-              mainAxisSpacing: 8, // Reduced from 12
-              childAspectRatio: 0.9, // Slightly increased from 0.8
+              crossAxisCount: 6,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+              childAspectRatio: 0.9,
             ),
             itemCount: badges.length,
             itemBuilder: (context, index) {
@@ -553,29 +809,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Column(
       children: [
         Container(
-          width: 40, // Reduced from 50
-          height: 40, // Reduced from 50
+          width: 40,
+          height: 40,
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             gradient:
                 unlocked
-                    ? LinearGradient(
-                      colors: [kBrand, kBrand.withValues(alpha: 0.7)],
-                    )
+                    ? LinearGradient(colors: [kBrand, kBrand.withOpacity(0.7)])
                     : null,
             color: unlocked ? null : Colors.grey[300],
           ),
           child: Icon(
             icon,
-            size: 20, // Reduced from 24
+            size: 20,
             color: unlocked ? Colors.white : Colors.grey[500],
           ),
         ),
-        const SizedBox(height: 4), // Reduced from 6
+        const SizedBox(height: 4),
         Text(
           label,
           style: TextStyle(
-            fontSize: 9, // Reduced from 10
+            fontSize: 9,
             fontWeight: FontWeight.w600,
             color: unlocked ? Colors.black87 : Colors.grey[500],
           ),
@@ -583,12 +837,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
-        if (!unlocked)
-          Icon(
-            Icons.lock,
-            size: 8, // Reduced from 10
-            color: Colors.grey[400],
-          ),
+        if (!unlocked) Icon(Icons.lock, size: 8, color: Colors.grey[400]),
       ],
     );
   }
@@ -618,7 +867,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           SizedBox(
             height: 100,
             child:
-                widget.dailyActivity.isEmpty
+                _dailyActivity.isEmpty
                     ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -638,16 +887,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     )
                     : ListView.builder(
                       scrollDirection: Axis.horizontal,
-                      itemCount: widget.dailyActivity.length,
+                      itemCount: _dailyActivity.length,
                       itemBuilder: (context, index) {
-                        final entry = widget.dailyActivity.entries.elementAt(
-                          index,
-                        );
+                        final entry = _dailyActivity.entries.elementAt(index);
                         final date = entry.key;
                         final activity = entry.value;
                         final maxActivity =
-                            widget.dailyActivity.values.isNotEmpty
-                                ? widget.dailyActivity.values.reduce(
+                            _dailyActivity.values.isNotEmpty
+                                ? _dailyActivity.values.reduce(
                                   (a, b) => a > b ? a : b,
                                 )
                                 : 1;
@@ -718,23 +965,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 12),
           Text(
-            '${widget.loginDays} Day Streak',
+            '$_loginDays Day Streak',
             style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
           Text(
-            widget.loginDays >= 7 ? 'Amazing consistency!' : 'Keep going!',
+            _loginDays >= 7 ? 'Amazing consistency!' : 'Keep going!',
             style: TextStyle(color: Colors.grey[600], fontSize: 14),
           ),
           const SizedBox(height: 16),
           LinearProgressIndicator(
-            value: (widget.loginDays % 7) / 7,
+            value: (_loginDays % 7) / 7,
             backgroundColor: Colors.orange.withOpacity(0.2),
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+            valueColor: const AlwaysStoppedAnimation<Color>(Colors.orange),
           ),
           const SizedBox(height: 8),
           Text(
-            'Next milestone: ${7 - (widget.loginDays % 7)} days',
+            'Next milestone: ${7 - (_loginDays % 7)} days',
             style: TextStyle(fontSize: 12, color: Colors.grey[600]),
           ),
         ],
@@ -832,7 +1079,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildRecentAchievements() {
-    if (widget.recentAchievements.isEmpty) {
+    if (_recentAchievements.isEmpty) {
       return Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
@@ -897,7 +1144,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
               const Spacer(),
               Text(
-                '${widget.recentAchievements.length} new',
+                '${_recentAchievements.length} new',
                 style: TextStyle(color: kBrand, fontWeight: FontWeight.w600),
               ),
             ],
@@ -907,7 +1154,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             spacing: 8,
             runSpacing: 8,
             children:
-                widget.recentAchievements.take(10).map((achievement) {
+                _recentAchievements.take(10).map((achievement) {
                   return Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -940,7 +1187,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // ===== ENHANCED ANALYTICS SECTION =====
   Widget _buildAnalyticsSection() {
     return Container(
       padding: const EdgeInsets.all(24),
@@ -1032,7 +1278,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  '${widget.totalStudyTime.toStringAsFixed(1)}h total',
+                  '${_totalStudyTime.toStringAsFixed(1)}h total',
                   style: const TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
@@ -1044,7 +1290,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(height: 20),
 
           // Custom Bar Chart for Study Time
-          if (widget.studyTimeBySubject.isNotEmpty)
+          if (_studyTimeBySubject.isNotEmpty)
             SizedBox(height: 200, child: _buildCustomBarChart())
           else
             Container(
@@ -1079,8 +1325,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildCustomBarChart() {
     // Check if studyTimeBySubject is empty or has no values
-    if (widget.studyTimeBySubject.isEmpty ||
-        widget.studyTimeBySubject.values.isEmpty) {
+    if (_studyTimeBySubject.isEmpty || _studyTimeBySubject.values.isEmpty) {
       return Container(
         height: 200,
         decoration: BoxDecoration(
@@ -1109,8 +1354,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     // Safe reduce with null check
-    final values =
-        widget.studyTimeBySubject.values.where((v) => v > 0).toList();
+    final values = _studyTimeBySubject.values.where((v) => v > 0).toList();
     if (values.isEmpty) {
       return Container(
         height: 200,
@@ -1128,12 +1372,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
 
     final maxValue = values.reduce((a, b) => a > b ? a : b);
-    final subjects = widget.studyTimeBySubject.keys.toList();
+    final subjects = _studyTimeBySubject.keys.toList();
 
     return Column(
       children:
           subjects.map((subject) {
-            final value = widget.studyTimeBySubject[subject]!;
+            final value = _studyTimeBySubject[subject]!;
             final percentage = maxValue > 0 ? value / maxValue : 0.0;
             final color = _getSubjectColor(subject);
 
@@ -1197,107 +1441,89 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return colors[subject.hashCode % colors.length];
   }
 
-
   List<Map<String, dynamic>> _getBadgeDefinitions() {
     return [
       {
         'icon': Icons.upload_file,
         'label': 'First Upload',
         'unlocked':
-            widget.unlockedBadges.contains('first_file') ||
-            widget.filesUploaded >= 1,
-        'description': 'Upload your first file (${widget.filesUploaded}/1)',
+            _unlockedBadges.contains('first_file') || _filesUploaded >= 1,
+        'description': 'Upload your first file ($_filesUploaded/1)',
       },
       {
         'icon': Icons.folder,
         'label': 'File Master',
         'unlocked':
-            widget.unlockedBadges.contains('file_master') ||
-            widget.filesUploaded >= 10,
-        'description': 'Upload 10 files (${widget.filesUploaded}/10)',
+            _unlockedBadges.contains('file_master') || _filesUploaded >= 10,
+        'description': 'Upload 10 files ($_filesUploaded/10)',
       },
       {
         'icon': Icons.workspace_premium,
         'label': 'File Expert',
         'unlocked':
-            widget.unlockedBadges.contains('file_expert') ||
-            widget.filesUploaded >= 50,
-        'description': 'Upload 50 files (${widget.filesUploaded}/50)',
+            _unlockedBadges.contains('file_expert') || _filesUploaded >= 50,
+        'description': 'Upload 50 files ($_filesUploaded/50)',
       },
       {
         'icon': Icons.emoji_events,
         'label': 'Week Warrior',
-        'unlocked':
-            widget.unlockedBadges.contains('week_warrior') ||
-            widget.loginDays >= 7,
-        'description':
-            'Login for 7 consecutive days (${widget.filesUploaded}/7)',
+        'unlocked': _unlockedBadges.contains('week_warrior') || _loginDays >= 7,
+        'description': 'Login for 7 consecutive days ($_loginDays/7)',
       },
       {
         'icon': Icons.stars,
         'label': 'Month Master',
         'unlocked':
-            widget.unlockedBadges.contains('month_master') ||
-            widget.loginDays >= 30,
-        'description':
-            'Login for 30 consecutive days (${widget.filesUploaded}/30)',
+            _unlockedBadges.contains('month_master') || _loginDays >= 30,
+        'description': 'Login for 30 consecutive days ($_loginDays/30)',
       },
       {
         'icon': Icons.smart_toy,
         'label': 'AI Explorer',
         'unlocked':
-            widget.unlockedBadges.contains('ai_explorer') ||
-            widget.aiChatInteractions >= 5,
-        'description': 'Use AI chat 5 times (${widget.aiChatInteractions}/5)',
+            _unlockedBadges.contains('ai_explorer') || _aiChatInteractions >= 5,
+        'description': 'Use AI chat 5 times ($_aiChatInteractions/5)',
       },
       {
         'icon': Icons.quiz,
         'label': 'Quiz Master',
         'unlocked':
-            widget.unlockedBadges.contains('quiz_master') ||
-            widget.correctAnswers >= 20,
-        'description':
-            'Answer 20 questions correctly (${widget.correctAnswers}/20)',
+            _unlockedBadges.contains('quiz_master') || _correctAnswers >= 20,
+        'description': 'Answer 20 questions correctly ($_correctAnswers/20)',
       },
       {
         'icon': Icons.military_tech,
         'label': 'Century Club',
         'unlocked':
-            widget.unlockedBadges.contains('century_club') ||
-            widget.totalPoints >= 100,
-        'description': 'Earn 100 XP (${widget.totalPoints}/100)',
+            _unlockedBadges.contains('century_club') || _totalPoints >= 100,
+        'description': 'Earn 100 XP ($_totalPoints/100)',
       },
       {
         'icon': Icons.diamond,
         'label': 'Point Prodigy',
         'unlocked':
-            widget.unlockedBadges.contains('point_prodigy') ||
-            widget.totalPoints >= 500,
-        'description': 'Earn 500 XP (${widget.totalPoints}/500)',
+            _unlockedBadges.contains('point_prodigy') || _totalPoints >= 500,
+        'description': 'Earn 500 XP ($_totalPoints/500)',
       },
       {
         'icon': Icons.school,
         'label': 'Scholar',
         'unlocked':
-            widget.unlockedBadges.contains('scholar') ||
-            widget.questionsAnswered >= 100,
-        'description': 'Answer 100 questions (${widget.questionsAnswered}/100)',
+            _unlockedBadges.contains('scholar') || _questionsAnswered >= 100,
+        'description': 'Answer 100 questions ($_questionsAnswered/100)',
       },
       {
         'icon': Icons.psychology,
         'label': 'Genius',
-        'unlocked':
-            widget.unlockedBadges.contains('genius') ||
-            widget.correctAnswers >= 50,
-        'description': 'Get 50 correct answers (${widget.correctAnswers}/50)',
+        'unlocked': _unlockedBadges.contains('genius') || _correctAnswers >= 50,
+        'description': 'Get 50 correct answers ($_correctAnswers/50)',
       },
       {
         'icon': Icons.auto_awesome,
         'label': 'Legendary',
         'unlocked':
-            widget.unlockedBadges.contains('legendary') ||
-            widget.totalPoints >= 1000,
-        'description': 'Reach 1000 XP (${widget.totalPoints}/1000)',
+            _unlockedBadges.contains('legendary') || _totalPoints >= 1000,
+        'description': 'Reach 1000 XP ($_totalPoints/1000)',
       },
     ];
   }
@@ -1316,12 +1542,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [kBrand, kBrand.withValues(alpha: 0.8)],
+          colors: [kBrand, kBrand.withOpacity(0.8)],
         ),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: kBrand.withValues(alpha: 0.3),
+            color: kBrand.withOpacity(0.3),
             blurRadius: 20,
             spreadRadius: 2,
           ),
@@ -1335,7 +1561,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
+                  color: Colors.white.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(
@@ -1371,7 +1597,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
+                color: Colors.white.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text(
