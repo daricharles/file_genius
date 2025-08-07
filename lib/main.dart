@@ -12,6 +12,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:intl/intl.dart';
 
 // Firebase
 import 'package:firebase_core/firebase_core.dart';
@@ -290,7 +291,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _user = FirebaseAuth.instance.currentUser; // Initialize user
     _attachFirestoreStreams();
     _loadUserData();
-    // The _trackLoginDay method was missing. It is now added.
     _trackLoginDay();
 
     // Set up periodic backup every 5 minutes
@@ -320,7 +320,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
-      // The _backupAllProgressData method was missing. It is now added.
       _backupAllProgressData();
     }
   }
@@ -409,6 +408,44 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _clearPreview() => setState(() => _previewFile = null);
 
   /* ── User Data Loading, Saving, and Tracking ────────────────── */
+  Future<void> _saveUserData({bool isNewUser = false}) async {
+    if (_user == null) return;
+
+    final userData = {
+      'filesUploaded': _filesUploaded,
+      'aiChatInteractions': _aiChatInteractions,
+      'questionsAnswered': _questionsAnswered,
+      'correctAnswers': _correctAnswers,
+      'totalPoints': _totalPoints,
+      'loginDays': _loginDays,
+      'lastLoginDate':
+          _lastLoginDate != null ? Timestamp.fromDate(_lastLoginDate!) : null,
+      'unlockedBadges': _unlockedBadges,
+      'recentAchievements': _recentAchievements,
+      'email': _user!.email,
+      'displayName': _user!.displayName ?? _userName,
+      'fileTypeStats': _fileTypeStats,
+      'dailyActivity': _dailyActivity,
+      'weeklyUploads': _weeklyUploads,
+      'monthlyUploads': _monthlyUploads,
+      'lastUpdated': FieldValue.serverTimestamp(),
+    };
+
+    if (isNewUser) {
+      userData['createdAt'] = FieldValue.serverTimestamp();
+    }
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_user!.uid)
+          .set(userData, SetOptions(merge: !isNewUser));
+      debugPrint('✅ User data saved to Firestore');
+    } catch (e) {
+      debugPrint('Error saving user data: $e');
+    }
+  }
+
   Future<void> _loadUserData() async {
     if (_user == null) return;
 
@@ -425,20 +462,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (doc.exists) {
         final data = doc.data()!;
         // Load stats from Firestore
-        _filesUploaded = data['filesUploaded'] ?? 0;
-        _aiChatInteractions = data['aiChatInteractions'] ?? 0;
-        _questionsAnswered = data['questionsAnswered'] ?? 0;
-        _correctAnswers = data['correctAnswers'] ?? 0;
-        _totalPoints = data['totalPoints'] ?? 0;
-        _loginDays = data['loginDays'] ?? 0;
-        _unlockedBadges = List<String>.from(data['unlockedBadges'] ?? []);
-        _recentAchievements = List<String>.from(
-          data['recentAchievements'] ?? [],
-        );
-        _userName = data['displayName'] ?? _user!.email ?? 'User';
+        setState(() {
+          _filesUploaded = data['filesUploaded'] ?? 0;
+          _aiChatInteractions = data['aiChatInteractions'] ?? 0;
+          _questionsAnswered = data['questionsAnswered'] ?? 0;
+          _correctAnswers = data['correctAnswers'] ?? 0;
+          _totalPoints = data['totalPoints'] ?? 0;
+          _loginDays = data['loginDays'] ?? 0;
+          _unlockedBadges = List<String>.from(data['unlockedBadges'] ?? []);
+          _recentAchievements = List<String>.from(
+            data['recentAchievements'] ?? [],
+          );
+          _userName = data['displayName'] ?? _user!.email ?? 'User';
+          _fileTypeStats = Map<String, int>.from(data['fileTypeStats'] ?? {});
+          _dailyActivity = Map<String, int>.from(data['dailyActivity'] ?? {});
+          _weeklyUploads = data['weeklyUploads'] ?? 0;
+          _monthlyUploads = data['monthlyUploads'] ?? 0;
 
-        final lastLoginTimestamp = data['lastLoginDate'] as Timestamp?;
-        _lastLoginDate = lastLoginTimestamp?.toDate();
+          final lastLoginTimestamp = data['lastLoginDate'] as Timestamp?;
+          _lastLoginDate = lastLoginTimestamp?.toDate();
+        });
       } else {
         // First time user, initialize with default values
         await _saveUserData(isNewUser: true);
@@ -455,6 +498,43 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  void onAIInteractionSuccess() {
+    setState(() {
+      _aiChatInteractions++;
+      _totalPoints += 5; // 5 points per AI interaction
+    });
+    _trackDailyActivity();
+    _checkForNewAchievements();
+    _saveUserData();
+  }
+
+  void _trackDailyActivity() {
+    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    setState(() {
+      _dailyActivity[today] = (_dailyActivity[today] ?? 0) + 1;
+    });
+  }
+
+  void _onFileUploadSuccess(FileMeta file) {
+    // Update file type statistics
+    final fileType = file.type.toLowerCase();
+    setState(() {
+      _filesUploaded++;
+      _totalPoints += 10; // 10 points per file upload
+      _weeklyUploads++;
+      _monthlyUploads++;
+
+      // Update file type statistics
+      _fileTypeStats[fileType] = (_fileTypeStats[fileType] ?? 0) + 1;
+    });
+
+    // Track daily activity
+    _trackDailyActivity();
+    _checkForNewAchievements();
+    _saveUserData();
+  }
+
+  // Ensure consistent login day tracking
   Future<void> _trackLoginDay() async {
     if (_user == null) return;
     // Wait a moment for _loadUserData to complete if it hasn't already
@@ -475,11 +555,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         // Consecutive day
         setState(() {
           _loginDays++;
+          _totalPoints += 5; // Daily login reward
         });
+        _checkForNewAchievements();
       } else if (difference > 1) {
         // Streak broken
         setState(() {
           _loginDays = 1; // Reset to 1 for the new login
+          _totalPoints += 5; // Still give points for logging in
         });
       }
       // If difference is 0, do nothing (already logged in today)
@@ -487,6 +570,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // First login ever
       setState(() {
         _loginDays = 1;
+        _totalPoints += 5; // First login reward
       });
     }
 
@@ -495,89 +579,100 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _saveUserData();
   }
 
-  Future<void> _saveUserData({bool isNewUser = false}) async {
+  // Implement periodic backup
+  void _backupAllProgressData() async {
     if (_user == null) return;
 
-    final userData = {
-      'filesUploaded': _filesUploaded,
-      'aiChatInteractions': _aiChatInteractions,
-      'questionsAnswered': _questionsAnswered,
-      'correctAnswers': _correctAnswers,
-      'totalPoints': _totalPoints,
-      'loginDays': _loginDays,
-      'lastLoginDate':
-          _lastLoginDate != null ? Timestamp.fromDate(_lastLoginDate!) : null,
-      'unlockedBadges': _unlockedBadges,
-      'recentAchievements': _recentAchievements,
-      'email': _user!.email,
-      'displayName': _user!.displayName,
-      'lastUpdated': FieldValue.serverTimestamp(),
-    };
-
-    if (isNewUser) {
-      userData['createdAt'] = FieldValue.serverTimestamp();
-    }
-
-    try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_user!.uid)
-          .set(userData, SetOptions(merge: !isNewUser));
-      debugPrint('✅ User data saved to Firestore');
-    } catch (e) {
-      debugPrint('Error saving user data: $e');
-    }
-  }
-
-  void _backupAllProgressData() {
-    _saveUserData();
-    _snack('Progress saved!');
-  }
-
-  void _incrementFileUploaded() {
-    setState(() {
-      _filesUploaded++;
-      _totalPoints += 10; // 10 points per file
-    });
-    _checkForNewAchievements();
-    _saveUserData();
-  }
-
-  void onAIInteractionSuccess() {
-    // Update the data without setState to avoid rebuilding the UI
-    _aiChatInteractions++;
-    _totalPoints += 5;
-    _checkForNewAchievements();
-    _saveUserData();
-
-    // Instead of calling setState immediately, we can schedule it for later
-    // or only update specific parts that need to be updated
-    Future.microtask(() {
-      if (mounted) {
-        // Only update the dashboard if it's currently visible
-        if (_showDashboard) {
-          setState(() {
-            // The values are already updated above
-          });
-        }
-      }
-    });
-  }
-
-  void onQuizCompleted(int questions, int correct) {
-    setState(() {
-      _questionsAnswered += questions;
-      _correctAnswers += correct;
-      _totalPoints += correct * 15; // Example: 15 points per correct answer
-    });
-    _checkForNewAchievements();
-    _saveUserData(); // Save data after updating
+    debugPrint('📦 Backing up user progress data...');
+    await _saveUserData();
   }
 
   void _checkForNewAchievements() {
-    // This logic can be expanded, but for now, just save after point changes
-    // You can add logic here to check for new badges and update _unlockedBadges
-    // and _recentAchievements, then call _saveUserData()
+    final newBadges = <String>[];
+
+    // Check for new badge unlocks
+    if (_filesUploaded >= 1 && !_unlockedBadges.contains('first_file')) {
+      newBadges.add('first_file');
+      _recentAchievements.add('First Upload');
+    }
+
+    if (_filesUploaded >= 10 && !_unlockedBadges.contains('file_master')) {
+      newBadges.add('file_master');
+      _recentAchievements.add('File Master');
+    }
+
+    if (_aiChatInteractions >= 5 && !_unlockedBadges.contains('ai_explorer')) {
+      newBadges.add('ai_explorer');
+      _recentAchievements.add('AI Explorer');
+    }
+
+    if (_totalPoints >= 100 && !_unlockedBadges.contains('century_club')) {
+      newBadges.add('century_club');
+      _recentAchievements.add('Century Club');
+    }
+
+    if (_loginDays >= 7 && !_unlockedBadges.contains('week_warrior')) {
+      newBadges.add('week_warrior');
+      _recentAchievements.add('Week Warrior');
+    }
+
+    // Add new badges to unlocked list
+    _unlockedBadges.addAll(newBadges);
+
+    // Keep only last 5 recent achievements
+    if (_recentAchievements.length > 5) {
+      _recentAchievements =
+          _recentAchievements.skip(_recentAchievements.length - 5).toList();
+    }
+
+    // Show achievement dialog for new badges
+    for (final badge in newBadges) {
+      _showAchievementDialog(badge);
+    }
+  }
+
+  void _showAchievementDialog(String badgeId) {
+    final badgeInfo = _getBadgeInfo(badgeId);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (context) => AchievementDialog(
+            title: badgeInfo['title']!,
+            icon: badgeInfo['icon'] as IconData,
+            points: badgeInfo['points'] as int,
+          ),
+    );
+  }
+
+  Map<String, dynamic> _getBadgeInfo(String badgeId) {
+    switch (badgeId) {
+      case 'first_file':
+        return {
+          'title': 'First Upload!',
+          'icon': Icons.upload_file,
+          'points': 50,
+        };
+      case 'file_master':
+        return {'title': 'File Master!', 'icon': Icons.folder, 'points': 100};
+      case 'ai_explorer':
+        return {'title': 'AI Explorer!', 'icon': Icons.smart_toy, 'points': 75};
+      case 'century_club':
+        return {
+          'title': 'Century Club!',
+          'icon': Icons.military_tech,
+          'points': 200,
+        };
+      case 'week_warrior':
+        return {
+          'title': 'Week Warrior!',
+          'icon': Icons.emoji_events,
+          'points': 150,
+        };
+      default:
+        return {'title': 'Achievement!', 'icon': Icons.star, 'points': 25};
+    }
   }
 
   @override
@@ -949,7 +1044,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       'uploadedAt': FieldValue.serverTimestamp(),
       'folderId': folderId,
     });
-
+  
     final result = FileMeta(
       id: doc.id,
       name: pFile.name,
@@ -959,9 +1054,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       uploadedAt: DateTime.now(),
       folderId: folderId,
     );
-
+  
     // Track badge progress
-    _incrementFileUploaded();
+    _onFileUploadSuccess(result);
 
     return result;
   }
@@ -1352,5 +1447,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (e) {
       _snack('Failed to move folder: $e', err: true);
     }
+  }
+
+  // Track quiz answer
+  void onQuizAnswerSubmitted(bool isCorrect) {
+    setState(() {
+      _questionsAnswered++;
+      if (isCorrect) {
+        _correctAnswers++;
+        _totalPoints += 15; // 15 points for correct answer
+      } else {
+        _totalPoints += 2; // 2 points for attempt
+      }
+    });
+
+    _trackDailyActivity();
+    _checkForNewAchievements();
+    _saveUserData();
   }
 }

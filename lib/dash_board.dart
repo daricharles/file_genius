@@ -1,8 +1,6 @@
 // ignore_for_file: deprecated_member_use, use_super_parameters
 
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'dart:math' as math;
 import 'constants.dart';
 import 'screens/chat_sessions_screen.dart';
 
@@ -75,6 +73,15 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   @override
+  void dispose() {
+    // Cancel any timers, subscriptions, etc.
+    // Example:
+    // _timer?.cancel();
+    // _subscription?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
@@ -118,9 +125,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             // Enhanced Analytics Section
             _buildAnalyticsSection(),
             const SizedBox(height: 24),
-            // AI Recommendations Section
-            _buildRecommendationsSection(),
-            const SizedBox(height: 24),
+            // AI Recommendations Section removed
             _buildRecentAchievements(),
             const SizedBox(height: 24),
             _buildDailyQuote(),
@@ -163,12 +168,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final currentDate =
         '${_getOrdinalSuffix(now.day)} ${monthNames[now.month - 1]} ${now.year}';
 
-    // Get current user data from Firebase Auth (same as sidebar)
-    final user = FirebaseAuth.instance.currentUser;
-    final displayName = user?.displayName;
-    final email = user?.email;
-    final userName = displayName ?? email ?? 'User';
-
     return Column(
       children: [
         // Dashboard title row
@@ -210,7 +209,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Welcome, $userName!',
+                    'Welcome, ${widget.userName}!',
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
@@ -250,7 +249,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [kBrand, kBrand.withValues(alpha: 0.8)],
+                  colors: [kBrand, kBrand.withOpacity(0.8)],
                 ),
                 borderRadius: BorderRadius.circular(20),
               ),
@@ -303,13 +302,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            kBrand.withValues(alpha: 0.1),
-            kBrand.withValues(alpha: 0.05),
-          ],
+          colors: [kBrand.withOpacity(0.1), kBrand.withOpacity(0.05)],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: kBrand.withValues(alpha: 0.2)),
+        border: Border.all(color: kBrand.withOpacity(0.2)),
       ),
       child: Row(
         children: [
@@ -319,7 +315,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               gradient: LinearGradient(
-                colors: [kBrand, kBrand.withValues(alpha: 0.7)],
+                colors: [kBrand, kBrand.withOpacity(0.7)],
               ),
             ),
             child: Center(
@@ -428,7 +424,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Colors.black.withOpacity(0.05),
             blurRadius: 10,
             spreadRadius: 2,
           ),
@@ -442,7 +438,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.1),
+                  color: color.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(icon, color: color, size: 24),
@@ -475,16 +471,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildBadgeSystem() {
     final badges = _getBadgeDefinitions();
-    final unlockedCount = badges.where((b) => b['unlocked'] as bool).length;
+    final unlockedCount =
+        badges.where((badge) => badge['unlocked'] as bool).length;
 
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20), // Reduced from 24
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Colors.black.withOpacity(0.05),
             blurRadius: 10,
             spreadRadius: 2,
           ),
@@ -497,43 +494,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               const Text(
                 'Achievement Badges',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ), // Reduced from 20
               ),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
+                  horizontal: 10, // Reduced from 12
+                  vertical: 4, // Reduced from 6
                 ),
                 decoration: BoxDecoration(
-                  color: kBrand.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(20),
+                  color: kBrand.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(16), // Reduced from 20
                 ),
                 child: Text(
-                  '$unlockedCount / ${badges.length} unlocked',
-                  style: TextStyle(color: kBrand, fontWeight: FontWeight.w600),
+                  '$unlockedCount / ${badges.length}',
+                  style: TextStyle(
+                    color: kBrand,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12, // Added smaller font size
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16), // Reduced from 20
+          const SizedBox(height: 12), // Reduced from 16
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 6, // Increased from 4 to 6
-              crossAxisSpacing: 12, // Reduced from 16
-              mainAxisSpacing: 12, // Reduced from 16
-              childAspectRatio: 0.9, // Increased from 0.8 for more compact look
+              crossAxisCount:
+                  6, // Increased from 4 to fit more badges in less height
+              crossAxisSpacing: 8, // Reduced from 12
+              mainAxisSpacing: 8, // Reduced from 12
+              childAspectRatio: 0.9, // Slightly increased from 0.8
             ),
             itemCount: badges.length,
             itemBuilder: (context, index) {
               final badge = badges[index];
-              return _buildBadgeTile(
-                badge['icon'] as IconData,
-                badge['label'] as String,
-                badge['unlocked'] as bool,
-                badge['description'] as String,
+              return Tooltip(
+                message: badge['description'],
+                child: _buildBadgeItem(
+                  badge['icon'] as IconData,
+                  badge['label'] as String,
+                  badge['unlocked'] as bool,
+                ),
               );
             },
           ),
@@ -542,55 +549,47 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildBadgeTile(
-    IconData icon,
-    String label,
-    bool unlocked,
-    String description,
-  ) {
-    return Tooltip(
-      message: description,
-      child: Column(
-        children: [
-          Container(
-            width: 50, // Reduced from 60
-            height: 50, // Reduced from 60
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient:
-                  unlocked
-                      ? LinearGradient(
-                        colors: [kBrand, kBrand.withValues(alpha: 0.7)],
-                      )
-                      : null,
-              color: unlocked ? null : Colors.grey[300],
-            ),
-            child: Icon(
-              icon,
-              size: 24, // Reduced from 30
-              color: unlocked ? Colors.white : Colors.grey[500],
-            ),
+  Widget _buildBadgeItem(IconData icon, String label, bool unlocked) {
+    return Column(
+      children: [
+        Container(
+          width: 40, // Reduced from 50
+          height: 40, // Reduced from 50
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient:
+                unlocked
+                    ? LinearGradient(
+                      colors: [kBrand, kBrand.withValues(alpha: 0.7)],
+                    )
+                    : null,
+            color: unlocked ? null : Colors.grey[300],
           ),
-          const SizedBox(height: 6), // Reduced from 8
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 10, // Reduced from 11
-              fontWeight: FontWeight.w600,
-              color: unlocked ? Colors.black87 : Colors.grey[500],
-            ),
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
+          child: Icon(
+            icon,
+            size: 20, // Reduced from 24
+            color: unlocked ? Colors.white : Colors.grey[500],
           ),
-          if (!unlocked)
-            Icon(
-              Icons.lock,
-              size: 10,
-              color: Colors.grey[400],
-            ), // Reduced from 12
-        ],
-      ),
+        ),
+        const SizedBox(height: 4), // Reduced from 6
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 9, // Reduced from 10
+            fontWeight: FontWeight.w600,
+            color: unlocked ? Colors.black87 : Colors.grey[500],
+          ),
+          textAlign: TextAlign.center,
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        if (!unlocked)
+          Icon(
+            Icons.lock,
+            size: 8, // Reduced from 10
+            color: Colors.grey[400],
+          ),
+      ],
     );
   }
 
@@ -602,7 +601,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Colors.black.withOpacity(0.05),
             blurRadius: 10,
             spreadRadius: 2,
           ),
@@ -621,9 +620,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child:
                 widget.dailyActivity.isEmpty
                     ? Center(
-                      child: Text(
-                        'Start uploading files to see your activity!',
-                        style: TextStyle(color: Colors.grey[600]),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.calendar_today,
+                            size: 32,
+                            color: Colors.grey[400],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Start uploading files to see your activity!',
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
+                        ],
                       ),
                     )
                     : ListView.builder(
@@ -633,7 +643,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         final entry = widget.dailyActivity.entries.elementAt(
                           index,
                         );
-                        final intensity = (entry.value / 5).clamp(0.1, 1.0);
+                        final date = entry.key;
+                        final activity = entry.value;
+                        final maxActivity =
+                            widget.dailyActivity.values.isNotEmpty
+                                ? widget.dailyActivity.values.reduce(
+                                  (a, b) => a > b ? a : b,
+                                )
+                                : 1;
+                        final intensity = (activity / maxActivity).clamp(
+                          0.1,
+                          1.0,
+                        );
 
                         return Container(
                           width: 60,
@@ -642,30 +663,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             children: [
                               Expanded(
                                 child: Container(
-                                  width: 40,
                                   decoration: BoxDecoration(
-                                    color: kBrand.withValues(alpha: intensity),
+                                    color: kBrand.withOpacity(intensity),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Center(
                                     child: Text(
-                                      entry.value.toString(),
+                                      activity.toString(),
                                       style: TextStyle(
+                                        fontWeight: FontWeight.bold,
                                         color:
                                             intensity > 0.5
                                                 ? Colors.white
-                                                : kBrand,
-                                        fontWeight: FontWeight.bold,
+                                                : Colors.black87,
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 8),
-                              Text(
-                                entry.key.substring(5, 10),
-                                style: const TextStyle(fontSize: 10),
-                              ),
+                              const SizedBox(height: 4),
+                              Text(date, style: const TextStyle(fontSize: 10)),
                             ],
                           ),
                         );
@@ -685,12 +702,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.orange.withValues(alpha: 0.1),
-            Colors.orange.withValues(alpha: 0.05),
+            Colors.orange.withOpacity(0.1),
+            Colors.orange.withOpacity(0.05),
           ],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
+        border: Border.all(color: Colors.orange.withOpacity(0.2)),
       ),
       child: Column(
         children: [
@@ -712,7 +729,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(height: 16),
           LinearProgressIndicator(
             value: (widget.loginDays % 7) / 7,
-            backgroundColor: Colors.orange.withValues(alpha: 0.2),
+            backgroundColor: Colors.orange.withOpacity(0.2),
             valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
           ),
           const SizedBox(height: 8),
@@ -733,7 +750,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Colors.black.withOpacity(0.05),
             blurRadius: 10,
             spreadRadius: 2,
           ),
@@ -794,9 +811,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
+          color: color.withOpacity(0.1),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withValues(alpha: 0.2)),
+          border: Border.all(color: color.withOpacity(0.2)),
         ),
         child: Row(
           children: [
@@ -823,7 +840,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
+              color: Colors.black.withOpacity(0.05),
               blurRadius: 10,
               spreadRadius: 2,
             ),
@@ -862,13 +879,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            kBrand.withValues(alpha: 0.1),
-            kBrand.withValues(alpha: 0.05),
-          ],
+          colors: [kBrand.withOpacity(0.1), kBrand.withOpacity(0.05)],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: kBrand.withValues(alpha: 0.2)),
+        border: Border.all(color: kBrand.withOpacity(0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -881,6 +895,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 'Recent Achievements',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
+              const Spacer(),
+              Text(
+                '${widget.recentAchievements.length} new',
+                style: TextStyle(color: kBrand, fontWeight: FontWeight.w600),
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -888,23 +907,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
             spacing: 8,
             runSpacing: 8,
             children:
-                widget.recentAchievements.map((achievement) {
+                widget.recentAchievements.take(10).map((achievement) {
                   return Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: kBrand.withValues(alpha: 0.2),
+                      color: kBrand.withOpacity(0.2),
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Text(
-                      achievement,
-                      style: TextStyle(
-                        color: kBrand,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 12,
-                      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.emoji_events, size: 16, color: kBrand),
+                        const SizedBox(width: 4),
+                        Text(
+                          achievement,
+                          style: TextStyle(
+                            color: kBrand,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
                   );
                 }).toList(),
@@ -916,65 +942,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   // ===== ENHANCED ANALYTICS SECTION =====
   Widget _buildAnalyticsSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Section Header
-        Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Row(
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Learning Analytics',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 20),
+
+          // Study time breakdown
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
+              // Left: Study time chart
+              Expanded(flex: 2, child: _buildStudyTimeChart()),
+              const SizedBox(width: 24),
+              // Right: Weekly performance
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Weekly Activity',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    _buildCustomBarChart(),
+                  ],
                 ),
-                child: const Icon(
-                  Icons.analytics,
-                  color: Colors.blue,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 12),
-              const Text(
-                'Learning Analytics',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
               ),
             ],
           ),
-        ),
 
-        // Analytics Cards Row
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Study Time Analytics
-            Expanded(
-              flex: 2,
-              child: Column(
-                children: [
-                  _buildStudyTimeChart(),
-                  const SizedBox(height: 24),
-                  _buildPerformanceMetrics(),
-                ],
-              ),
-            ),
-            const SizedBox(width: 24),
-
-            // Learning Patterns & Insights
-            Expanded(
-              child: Column(
-                children: [
-                  _buildLearningPatterns(),
-                  const SizedBox(height: 24),
-                  _buildWeakAreasCard(),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ],
+          const SizedBox(height: 16),
+          const Divider(),
+          const SizedBox(height: 16),
+        ],
+      ),
     );
   }
 
@@ -986,7 +1007,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: Colors.black.withOpacity(0.05),
             blurRadius: 10,
             spreadRadius: 2,
           ),
@@ -1007,7 +1028,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.blue.withValues(alpha: 0.1),
+                  color: Colors.blue.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
@@ -1057,7 +1078,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildCustomBarChart() {
-    final maxValue = widget.studyTimeBySubject.values.reduce(math.max);
+    // Check if studyTimeBySubject is empty or has no values
+    if (widget.studyTimeBySubject.isEmpty ||
+        widget.studyTimeBySubject.values.isEmpty) {
+      return Container(
+        height: 200,
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.timer_off, size: 48, color: Colors.grey[400]),
+              const SizedBox(height: 12),
+              Text(
+                'No study time recorded yet',
+                style: TextStyle(color: Colors.grey[600], fontSize: 16),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Start studying to see your time distribution',
+                style: TextStyle(color: Colors.grey[500], fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Safe reduce with null check
+    final values =
+        widget.studyTimeBySubject.values.where((v) => v > 0).toList();
+    if (values.isEmpty) {
+      return Container(
+        height: 200,
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: Text(
+            'No study time data available',
+            style: TextStyle(color: Colors.grey[600], fontSize: 16),
+          ),
+        ),
+      );
+    }
+
+    final maxValue = values.reduce((a, b) => a > b ? a : b);
     final subjects = widget.studyTimeBySubject.keys.toList();
 
     return Column(
@@ -1127,737 +1197,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return colors[subject.hashCode % colors.length];
   }
 
-  Widget _buildPerformanceMetrics() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.trending_up, color: Colors.green, size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                'Performance Metrics',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-
-          Row(
-            children: [
-              Expanded(
-                child: _buildMetricTile(
-                  'Average Accuracy',
-                  '${widget.averageAccuracy.toStringAsFixed(1)}%',
-                  Icons.gps_fixed,
-                  Colors.green,
-                  widget.averageAccuracy >= 80
-                      ? 'Excellent!'
-                      : widget.averageAccuracy >= 60
-                      ? 'Good'
-                      : 'Needs improvement',
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _buildMetricTile(
-                  'Study Streak',
-                  '$widget.loginDays days',
-                  Icons.local_fire_department,
-                  Colors.orange,
-                  widget.loginDays >= 7 ? 'Amazing!' : 'Keep going!',
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
-          // Weekly Performance Trend
-          if (widget.weeklyPerformance.isNotEmpty) ...[
-            const Text(
-              'Weekly Performance',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 60,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children:
-                    widget.weeklyPerformance.entries.map((entry) {
-                      final day = entry.key;
-                      final score = entry.value;
-                      final height = (score / 100) * 50; // Max height 50
-
-                      return Column(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Container(
-                            width: 20,
-                            height: height,
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withValues(alpha: 0.7),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            day.substring(0, 1),
-                            style: const TextStyle(fontSize: 10),
-                          ),
-                        ],
-                      );
-                    }).toList(),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMetricTile(
-    String title,
-    String value,
-    IconData icon,
-    Color color,
-    String subtitle,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: color, size: 16),
-              const Spacer(),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            title,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            subtitle,
-            style: TextStyle(fontSize: 10, color: Colors.grey[600]),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLearningPatterns() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.psychology, color: Colors.purple, size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                'Learning Patterns',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-
-          _buildPatternItem(
-            'Best Study Time',
-            widget.preferredStudyTime,
-            Icons.schedule,
-            Colors.blue,
-          ),
-          const SizedBox(height: 16),
-
-          _buildPatternItem(
-            'Most Active Subject',
-            widget.studyTimeBySubject.isNotEmpty
-                ? widget.studyTimeBySubject.entries
-                    .reduce((a, b) => a.value > b.value ? a : b)
-                    .key
-                : 'No data yet',
-            Icons.book,
-            Colors.green,
-          ),
-          const SizedBox(height: 16),
-
-          _buildPatternItem(
-            'Study Sessions',
-            '${widget.studyTimeBySubject.length} subjects tracked',
-            Icons.timeline,
-            Colors.orange,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPatternItem(
-    String title,
-    String value,
-    IconData icon,
-    Color color,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Icon(icon, color: color, size: 16),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Text(
-                  value,
-                  style: TextStyle(fontSize: 14, color: Colors.grey[700]),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildWeakAreasCard() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.warning_amber, color: Colors.amber, size: 20),
-              const SizedBox(width: 8),
-              const Text(
-                'Areas for Improvement',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-
-          if (widget.weakAreas.isNotEmpty)
-            ...widget.weakAreas
-                .take(3)
-                .map(
-                  (area) => Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.amber.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: Colors.amber.withValues(alpha: 0.3),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.trending_down,
-                            color: Colors.amber[700],
-                            size: 16,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              area,
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                )
-          else
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.green.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.check_circle, color: Colors.green[600], size: 20),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Text(
-                      'Great job! No weak areas detected.',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // ===== AI-POWERED RECOMMENDATIONS SECTION =====
-  Widget _buildRecommendationsSection() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Colors.purple.withValues(alpha: 0.1),
-            Colors.purple.withValues(alpha: 0.05),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.purple.withValues(alpha: 0.2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Section Header
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.purple.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(
-                  Icons.auto_awesome,
-                  color: Colors.purple,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 12),
-              const Text(
-                'AI-Powered Recommendations',
-                style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              ),
-              const Spacer(),
-              ElevatedButton.icon(
-                onPressed: () => _generateAIRecommendations(),
-                icon: const Icon(Icons.refresh, size: 16),
-                label: const Text('Update'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.purple,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-
-          // Recommendations Grid
-          if (widget.aiRecommendations.isNotEmpty)
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 16,
-                mainAxisSpacing: 16,
-                childAspectRatio: 1.2,
-              ),
-              itemCount: math.min(widget.aiRecommendations.length, 4),
-              itemBuilder: (context, index) {
-                final recommendation = widget.aiRecommendations[index];
-                return _buildRecommendationCard(recommendation);
-              },
-            )
-          else
-            _buildEmptyRecommendations(),
-
-          const SizedBox(height: 20),
-
-          // Export Options
-          _buildExportOptions(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRecommendationCard(Map<String, dynamic> recommendation) {
-    final type = recommendation['type'] as String;
-    final title = recommendation['title'] as String;
-    final description = recommendation['description'] as String;
-    final priority = recommendation['priority'] as String;
-
-    final color = _getRecommendationColor(type);
-    final icon = _getRecommendationIcon(type);
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 8,
-            spreadRadius: 1,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Icon(icon, color: color, size: 16),
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                  color: _getPriorityColor(priority).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  priority.toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: _getPriorityColor(priority),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            title,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: Text(
-              description,
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color _getRecommendationColor(String type) {
-    switch (type) {
-      case 'study_schedule':
-        return Colors.blue;
-      case 'weak_area':
-        return Colors.orange;
-      case 'content':
-        return Colors.green;
-      case 'review':
-        return Colors.purple;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  IconData _getRecommendationIcon(String type) {
-    switch (type) {
-      case 'study_schedule':
-        return Icons.schedule;
-      case 'weak_area':
-        return Icons.trending_up;
-      case 'content':
-        return Icons.library_books;
-      case 'review':
-        return Icons.refresh;
-      default:
-        return Icons.lightbulb;
-    }
-  }
-
-  Color _getPriorityColor(String priority) {
-    switch (priority.toLowerCase()) {
-      case 'high':
-        return Colors.red;
-      case 'medium':
-        return Colors.orange;
-      case 'low':
-        return Colors.green;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  Widget _buildEmptyRecommendations() {
-    return Container(
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.purple.withValues(alpha: 0.2)),
-      ),
-      child: Column(
-        children: [
-          Icon(
-            Icons.auto_awesome_outlined,
-            size: 48,
-            color: Colors.purple[300],
-          ),
-          const SizedBox(height: 16),
-          const Text(
-            'AI Recommendations Loading...',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Our AI is analyzing your learning patterns to provide personalized recommendations.',
-            style: TextStyle(color: Colors.grey[600]),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: () => _generateAIRecommendations(),
-            icon: const Icon(Icons.smart_toy, size: 16),
-            label: const Text('Generate Recommendations'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.purple,
-              foregroundColor: Colors.white,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildExportOptions() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.withValues(alpha: 0.2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Export & Share Progress',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _buildExportButton(
-                  'PDF Report',
-                  Icons.picture_as_pdf,
-                  Colors.red,
-                  () => _exportToPDF(),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildExportButton(
-                  'CSV Data',
-                  Icons.table_chart,
-                  Colors.green,
-                  () => _exportToCSV(),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildExportButton(
-                  'Share Achievement',
-                  Icons.share,
-                  Colors.blue,
-                  () => _shareAchievement(),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildExportButton(
-    String label,
-    IconData icon,
-    Color color,
-    VoidCallback onTap,
-  ) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withValues(alpha: 0.3)),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, color: color, size: 20),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: color,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ===== AI RECOMMENDATION METHODS =====
-  void _generateAIRecommendations() {
-    // Simulate AI recommendation generation
-    // In a real app, this would call an AI service
-    debugPrint('Generating AI recommendations...');
-
-    // In a stateful widget, you would call setState here
-    // For now, just show a snackbar
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('AI recommendations updated!'),
-        backgroundColor: Colors.purple,
-      ),
-    );
-  }
-
-  void _exportToPDF() {
-    // Generate PDF report
-    debugPrint('Exporting to PDF...');
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('PDF report generation started. Check downloads folder.'),
-        backgroundColor: Colors.red,
-      ),
-    );
-  }
-
-  void _exportToCSV() {
-    // Export data to CSV
-    debugPrint('Exporting to CSV...');
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('CSV data exported successfully!'),
-        backgroundColor: Colors.green,
-      ),
-    );
-  }
-
-  void _shareAchievement() {
-    // Share achievement on social media
-    debugPrint('Sharing achievement...');
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Achievement shared! 🎉'),
-        backgroundColor: Colors.blue,
-      ),
-    );
-  }
 
   List<Map<String, dynamic>> _getBadgeDefinitions() {
     return [
@@ -2059,266 +1398,56 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       child: Column(
         children: [
-          // Quick Links Section
+          const Text(
+            'FileGenius Learning Platform',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _buildFooterLink('Privacy Policy', Icons.security, () {
-                _showInfoDialog(
-                  context,
-                  'Privacy Policy',
-                  'Your privacy is important to us. FileGenius collects minimal data necessary for app functionality. We never share your personal information with third parties. All uploaded files are stored securely in your personal Firebase storage.',
-                );
-              }),
-              _buildFooterLink('Terms & Conditions', Icons.description, () {
-                _showInfoDialog(
-                  context,
-                  'Terms & Conditions',
-                  'By using FileGenius, you agree to our terms. The app is provided "as is" for educational purposes. Users are responsible for their own content. We reserve the right to update these terms as needed.',
-                );
-              }),
-              _buildFooterLink('FAQ', Icons.help_outline, () {
-                _showFAQDialog(context);
-              }),
-              _buildFooterLink('Contact Us', Icons.email, () {
-                _showInfoDialog(
-                  context,
-                  'Contact Us',
-                  'Need help? Reach out to us:\n\nEmail: support@filegenius.com\nPhone: +1 (555) 123-4567\nHours: Mon-Fri 9AM-5PM EST\n\nWe\'re here to help you succeed!',
-                );
-              }),
+              _buildFooterItem(Icons.info_outline, 'About'),
+              _buildFooterItem(Icons.help_outline, 'Help'),
+              _buildFooterItem(Icons.privacy_tip, 'Privacy'),
+              _buildFooterItem(Icons.contact_support, 'Contact'),
             ],
           ),
           const SizedBox(height: 24),
-          const Divider(color: Colors.grey),
-          const SizedBox(height: 16),
-          // Copyright Section
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                '© 2025 FileGenius. All rights reserved.',
-                style: TextStyle(color: Colors.grey[600], fontSize: 14),
-              ),
-              Row(
-                children: [
-                  Text(
-                    'Version 1.0.0',
-                    style: TextStyle(color: Colors.grey[500], fontSize: 12),
-                  ),
-                  const SizedBox(width: 16),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.circle, color: Colors.green, size: 8),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Online',
-                          style: TextStyle(
-                            color: Colors.green[700],
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ],
+          Text(
+            'Version 1.0.0 • © ${DateTime.now().year} FileGenius',
+            style: TextStyle(color: Colors.grey[600], fontSize: 12),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildFooterLink(String label, IconData icon, VoidCallback onTap) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: kBrand.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(icon, color: kBrand, size: 20),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: TextStyle(
-                color: Colors.grey[700],
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
+  Widget _buildFooterItem(IconData icon, String label) {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: kBrand.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: kBrand, size: 20),
         ),
-      ),
-    );
-  }
-
-  void _showInfoDialog(BuildContext context, String title, String content) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
+        const SizedBox(height: 8),
+        Text(
+          label,
+          style: TextStyle(
+            color: Colors.grey[700],
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
           ),
-          title: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: kBrand.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(Icons.info_outline, color: kBrand, size: 20),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Text(content, style: const TextStyle(height: 1.5)),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: Text('Close', style: TextStyle(color: kBrand)),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  void _showFAQDialog(BuildContext context) {
-    final faqs = [
-      {
-        'question': 'How do I upload files?',
-        'answer':
-            'Click the "Upload Files" button or drag and drop files directly onto the upload area. Supported formats: PDF, PPTX, DOCX.',
-      },
-      {
-        'question': 'How does the AI chat work?',
-        'answer':
-            'Our AI assistant can help you understand your documents, generate questions, and provide explanations about your content.',
-      },
-      {
-        'question': 'How are points calculated?',
-        'answer':
-            'Earn points by: uploading files (10 XP), AI interactions (5 XP), correct answers (15 XP), attempts (2 XP), and daily logins (5 XP).',
-      },
-      {
-        'question': 'Can I delete my data?',
-        'answer':
-            'Yes! You can delete individual files or clear all data from the sidebar menu. This action cannot be undone.',
-      },
-      {
-        'question': 'Is my data secure?',
-        'answer':
-            'Absolutely! All files are stored in your personal Firebase storage with enterprise-grade security. We never access your content.',
-      },
-    ];
-
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return Dialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 600, maxHeight: 500),
-            child: Column(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: kBrand.withValues(alpha: 0.1),
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(16),
-                      topRight: Radius.circular(16),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.help_outline, color: kBrand, size: 24),
-                      const SizedBox(width: 12),
-                      const Text(
-                        'Frequently Asked Questions',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(24),
-                    itemCount: faqs.length,
-                    separatorBuilder: (context, index) => const Divider(),
-                    itemBuilder: (context, index) {
-                      final faq = faqs[index];
-                      return ExpansionTile(
-                        title: Text(
-                          faq['question']!,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                            child: Text(
-                              faq['answer']!,
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                height: 1.5,
-                              ),
-                            ),
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+          textAlign: TextAlign.center,
+        ),
+      ],
     );
   }
 
@@ -2327,86 +1456,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       {
         'quote': 'The only way to do great work is to love what you do.',
         'author': 'Steve Jobs',
-      },
-      {
-        'quote': 'Learning never exhausts the mind.',
-        'author': 'Leonardo da Vinci',
-      },
-      {
-        'quote':
-            'Education is the most powerful weapon which you can use to change the world.',
-        'author': 'Nelson Mandela',
-      },
-      {
-        'quote':
-            'The beautiful thing about learning is that no one can take it away from you.',
-        'author': 'B.B. King',
-      },
-      {
-        'quote':
-            'Success is not final, failure is not fatal: it is the courage to continue that counts.',
-        'author': 'Winston Churchill',
-      },
-      {
-        'quote':
-            'The future belongs to those who believe in the beauty of their dreams.',
-        'author': 'Eleanor Roosevelt',
-      },
-      {
-        'quote':
-            'It does not matter how slowly you go as long as you do not stop.',
-        'author': 'Confucius',
-      },
-      {
-        'quote': 'The expert in anything was once a beginner.',
-        'author': 'Helen Hayes',
-      },
-      {
-        'quote': 'Don\'t let yesterday take up too much of today.',
-        'author': 'Will Rogers',
-      },
-      {
-        'quote': 'You learn something every day if you pay attention.',
-        'author': 'Ray LeBlond',
-      },
-      {
-        'quote':
-            'The capacity to learn is a gift; the ability to learn is a skill; the willingness to learn is a choice.',
-        'author': 'Brian Herbert',
-      },
-      {
-        'quote':
-            'Study hard what interests you the most in the most undisciplined, irreverent and original manner possible.',
-        'author': 'Richard Feynman',
-      },
-      {
-        'quote': 'The roots of education are bitter, but the fruit is sweet.',
-        'author': 'Aristotle',
-      },
-      {
-        'quote':
-            'Learning is a treasure that will follow its owner everywhere.',
-        'author': 'Chinese Proverb',
-      },
-      {
-        'quote':
-            'The more that you read, the more things you will know. The more that you learn, the more places you\'ll go.',
-        'author': 'Dr. Seuss',
-      },
-      {
-        'quote':
-            'Intelligence plus character—that is the goal of true education.',
-        'author': 'Martin Luther King Jr.',
-      },
-      {
-        'quote':
-            'Tell me and I forget, teach me and I may remember, involve me and I learn.',
-        'author': 'Benjamin Franklin',
-      },
-      {
-        'quote':
-            'The best time to plant a tree was 20 years ago. The second best time is now.',
-        'author': 'Chinese Proverb',
       },
       {
         'quote': 'What we learn with pleasure we never forget.',
@@ -2420,25 +1469,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       {
         'quote': 'The journey of a thousand miles begins with one step.',
         'author': 'Lao Tzu',
-      },
-      {
-        'quote':
-            'Knowledge is power. Information is liberating. Education is the premise of progress.',
-        'author': 'Kofi Annan',
-      },
-      {
-        'quote':
-            'The mind is not a vessel to be filled, but a fire to be kindled.',
-        'author': 'Plutarch',
-      },
-      {
-        'quote': 'In learning you will teach, and in teaching you will learn.',
-        'author': 'Phil Collins',
-      },
-      {
-        'quote':
-            'Education is not preparation for life; education is life itself.',
-        'author': 'John Dewey',
       },
       {
         'quote': 'The best investment you can make is in yourself.',
