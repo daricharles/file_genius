@@ -102,15 +102,15 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   @override
   void didUpdateWidget(EnhancedAIChatWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.filePath != oldWidget.filePath) {
-      // If the file path has changed, we need to re-initialize the chat.
-      // We set initializing to true to show a loading indicator.
+    // Only reinitialize if the actual file has changed, not just parent state
+    if (widget.filePath != oldWidget.filePath ||
+        widget.fileName != oldWidget.fileName) {
       setState(() {
         _isInitializing = true;
       });
-      // We then load the new chat session.
       _loadChatSession();
     }
+    // Ignore other property changes that don't affect the chat session
   }
 
   Future<void> _loadChatSession() async {
