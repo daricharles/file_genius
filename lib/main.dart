@@ -6,6 +6,7 @@
 // ignore_for_file: prefer_final_fields
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -14,6 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
 
 // Firebase
 import 'package:firebase_core/firebase_core.dart';
@@ -276,6 +278,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   List<StreamSubscription> _folderSubs = [];
   StreamSubscription? _foldersSubscription;
   StreamSubscription? _topLevelFilesSubscription;
+  Timer? _backupTimer;
   bool _sidebarCollapsed = false;
   bool _showDashboard = false;
   bool _isLoading = false;
@@ -294,9 +297,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // User data
   String _userName = 'User';
 
-  // Periodic backup timer
-  Timer? _backupTimer;
-
   // Last activity tracking
   DateTime? _lastActivityTime;
 
@@ -304,6 +304,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // Add this field to your state class:
   final List<int> _streakMilestones = [3, 7, 14, 30, 100];
+
+  // Add this field to your _HomeScreenState:
+  final GlobalKey<DashboardScreenState> _dashboardKey =
+      GlobalKey<DashboardScreenState>();
 
   /* ── life‑cycle ───────────────────────────────────────────── */
   @override
@@ -326,13 +330,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _backupTimer?.cancel();
-    _foldersSubscription?.cancel();
-    _topLevelFilesSubscription?.cancel();
-    _inactivityTimer?.cancel(); // <-- Uncomment this line
-    for (final s in _folderSubs) {
-      s.cancel();
+    // Save dashboard data before quitting
+    final dashboardProvider = Provider.of<DashboardProvider>(
+      context,
+      listen: false,
+    );
+    final userId = _user?.uid;
+    if (userId != null) {
+      saveDashboardDataToFirestore(dashboardProvider.data, userId);
+      saveDashboardDataToCache(dashboardProvider.data);
     }
     super.dispose();
   }
@@ -524,51 +530,57 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void onAIInteractionSuccess() {
-    _updateLastActivity(); // <-- Add this line
+    _updateLastActivity();
     setState(() {
       _aiChatInteractions++;
-      _totalPoints += 5; // 5 points per AI interaction
+      _totalPoints += 5;
     });
     _trackDailyActivity();
     _checkForNewAchievements();
     _saveUserData();
+    Provider.of<DashboardProvider>(context, listen: false).incrementPoints(5);
+
+    // Refresh dashboard if visible
+    _dashboardKey.currentState?.refreshDashboard();
   }
 
   void _onFileUploadSuccess(FileMeta file) {
-    _updateLastActivity(); // <-- Add this line
-    // Update file type statistics
+    _updateLastActivity();
     final fileType = file.type.toLowerCase();
     setState(() {
       _filesUploaded++;
-      _totalPoints += 10; // 10 points per file upload
+      _totalPoints += 10;
       _weeklyUploads++;
       _monthlyUploads++;
-
-      // Update file type statistics
       _fileTypeStats[fileType] = (_fileTypeStats[fileType] ?? 0) + 1;
     });
 
-    // Track daily activity
     _trackDailyActivity();
     _checkForNewAchievements();
     _saveUserData();
+
+    // Refresh dashboard if visible
+    _dashboardKey.currentState?.refreshDashboard();
   }
 
   void onQuizAnswerSubmitted(bool isCorrect) {
-    _updateLastActivity(); // <-- Add this line
+    _updateLastActivity();
     setState(() {
       _questionsAnswered++;
       if (isCorrect) {
         _correctAnswers++;
-        _totalPoints += 15; // 15 points for correct answer
+        _totalPoints += 15;
       } else {
-        _totalPoints += 2; // 2 points for attempt
+        _totalPoints += 2;
       }
     });
 
     _trackDailyActivity();
     _checkForNewAchievements();
     _saveUserData();
+
+    // Refresh dashboard if visible
+    _dashboardKey.currentState?.refreshDashboard();
   }
 
   // Ensure consistent login day tracking
@@ -844,6 +856,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       Widget content;
       if (_showDashboard) {
         content = DashboardScreen(
+          key: _dashboardKey,
           userId: _user!.uid,
           onBackPressed: () {
             setState(() {
@@ -870,6 +883,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               'AI Assistant: Ask questions about your files in the file preview pane',
             );
           },
+          dashboardKey: _dashboardKey, // Pass the key
         );
       } else if (_previewFile != null) {
         content = MainPane(
@@ -1550,5 +1564,102 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     setState(() {
       _dailyActivity[key] = (_dailyActivity[key] ?? 0) + 1;
     });
+  }
+}
+
+Future<void> saveDashboardDataToFirestore(
+  DashboardData data,
+  String userId,
+) async {
+  await FirebaseFirestore.instance
+      .collection('dashboards')
+      .doc(userId)
+      .set(data.toJson(), SetOptions(merge: true));
+}
+
+Future<void> saveDashboardDataToCache(DashboardData data) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setString('dashboardData', jsonEncode(data.toJson()));
+}
+
+class DashboardProvider extends ChangeNotifier {
+  DashboardData _data = DashboardData();
+
+  DashboardData get data => _data;
+
+  void update(DashboardData newData) {
+    _data = newData;
+    notifyListeners();
+  }
+
+  void updateField(String field, dynamic value) {
+    // Update a single field and notify
+    switch (field) {
+      case 'filesUploaded':
+        _data.filesUploaded = value;
+        break;
+      // ... handle other fields
+    }
+    notifyListeners();
+  }
+
+  // Add methods to increment points, uploads, etc.
+  void incrementPoints(int amount) {
+    _data.totalPoints += amount;
+    notifyListeners();
+  }
+
+  // ... add more as needed
+}
+
+class DashboardData {
+  int filesUploaded;
+  int aiChatInteractions;
+  int questionsAnswered;
+  int correctAnswers;
+  int loginDays;
+  int totalPoints;
+  int weeklyUploads;
+  int monthlyUploads;
+  Map<String, int> fileTypeStats;
+  Map<String, int> dailyActivity;
+  List<String> unlockedBadges;
+  List<String> recentAchievements;
+  String userName;
+
+  DashboardData({
+    this.filesUploaded = 0,
+    this.aiChatInteractions = 0,
+    this.questionsAnswered = 0,
+    this.correctAnswers = 0,
+    this.loginDays = 0,
+    this.totalPoints = 0,
+    this.weeklyUploads = 0,
+    this.monthlyUploads = 0,
+    Map<String, int>? fileTypeStats,
+    Map<String, int>? dailyActivity,
+    List<String>? unlockedBadges,
+    List<String>? recentAchievements,
+    this.userName = 'User',
+  }) : fileTypeStats = fileTypeStats ?? {},
+       dailyActivity = dailyActivity ?? {},
+       unlockedBadges = unlockedBadges ?? [],
+       recentAchievements = recentAchievements ?? [];
+  Map<String, dynamic> toJson() {
+    return {
+      'filesUploaded': filesUploaded,
+      'aiChatInteractions': aiChatInteractions,
+      'questionsAnswered': questionsAnswered,
+      'correctAnswers': correctAnswers,
+      'loginDays': loginDays,
+      'totalPoints': totalPoints,
+      'weeklyUploads': weeklyUploads,
+      'monthlyUploads': monthlyUploads,
+      'fileTypeStats': fileTypeStats,
+      'dailyActivity': dailyActivity,
+      'unlockedBadges': unlockedBadges,
+      'recentAchievements': recentAchievements,
+      'userName': userName,
+    };
   }
 }

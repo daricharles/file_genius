@@ -15,6 +15,7 @@ class DashboardScreen extends StatefulWidget {
   final VoidCallback? onUploadFiles;
   final VoidCallback? onGenerateQuiz;
   final VoidCallback? onAIInteraction;
+  final GlobalKey<DashboardScreenState>? dashboardKey; // Add this
 
   const DashboardScreen({
     super.key,
@@ -23,13 +24,14 @@ class DashboardScreen extends StatefulWidget {
     this.onUploadFiles,
     this.onGenerateQuiz,
     this.onAIInteraction,
+    this.dashboardKey, // Add this
   });
 
   @override
-  State<DashboardScreen> createState() => _DashboardScreenState();
+  State<DashboardScreen> createState() => DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class DashboardScreenState extends State<DashboardScreen> {
   // Dashboard state
   bool _isLoading = true;
   bool _hasError = false;
@@ -69,8 +71,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   void initState() {
     super.initState();
+    _fetchUserName(); // Fetch the real user name
     _loadDashboardData();
-    // Set up periodic refresh every 5 minutes
     _refreshTimer = Timer.periodic(const Duration(minutes: 5), (_) {
       _loadDashboardData();
     });
@@ -293,6 +295,29 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (mounted) {
       await _loadDashboardData();
     }
+  }
+
+  Future<void> _fetchUserName() async {
+    try {
+      final userDoc =
+          await _firestore.collection('users').doc(widget.userId).get();
+      if (userDoc.exists && userDoc.data() != null) {
+        final data = userDoc.data()!;
+        setState(() {
+          _userName = data['name'] ?? 'User';
+        });
+      }
+    } catch (e) {
+      // Optionally handle error
+      setState(() {
+        _userName = 'User';
+      });
+    }
+  }
+
+  // Expose a public refresh method
+  Future<void> refreshDashboard() async {
+    await _loadDashboardData();
   }
 
   @override
