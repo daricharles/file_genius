@@ -1,5 +1,4 @@
 // lib/main.dart
-//
 // Root:  FileGeniusSidebar  ⇆  MainPane  +  FileViewer
 // -----------------------------------------------------
 
@@ -15,7 +14,6 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:provider/provider.dart';
 
 // Firebase
 import 'package:firebase_core/firebase_core.dart';
@@ -252,8 +250,6 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  // The scaffold key is not used, so it can be removed.
-  // final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   User? _user;
 
   // State variables for user stats
@@ -267,7 +263,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   List<String> _recentAchievements = [];
   DateTime? _lastLoginDate;
 
-  /* ── reactive state ───────────────────────────────────────── */
+  /* reactive state */
   final List<Folder> _folders = [];
   final List<FileMeta> _topLevelFiles = [];
   final Map<String, List<FileMeta>> _filesByFolder = {};
@@ -309,17 +305,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final GlobalKey<DashboardScreenState> _dashboardKey =
       GlobalKey<DashboardScreenState>();
 
-  /* ── life‑cycle ───────────────────────────────────────────── */
+  /* life‑cycle */
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _user = FirebaseAuth.instance.currentUser; // Initialize user
+    _user = FirebaseAuth.instance.currentUser;
     _attachFirestoreStreams();
     _loadUserData();
     _trackLoginDay();
 
-    // Set up periodic backup every 5 minutes
     _backupTimer = Timer.periodic(
       const Duration(minutes: 5),
       (timer) => _backupAllProgressData(),
@@ -330,24 +325,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    // Save dashboard data before quitting
-    final dashboardProvider = Provider.of<DashboardProvider>(
-      context,
-      listen: false,
-    );
-    final userId = _user?.uid;
-    if (userId != null) {
-      saveDashboardDataToFirestore(dashboardProvider.data, userId);
-      saveDashboardDataToCache(dashboardProvider.data);
+    _saveUserData();
+    _syncDashboardToFirestore();
+
+    _backupTimer?.cancel();
+    _inactivityTimer?.cancel();
+
+    _foldersSubscription?.cancel();
+    _topLevelFilesSubscription?.cancel();
+    for (final s in _folderSubs) {
+      s.cancel();
     }
+    _folderSubs.clear();
+
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-
-    // Backup data when app goes to background or is paused
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
@@ -355,7 +352,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /* ── Firestore listeners ──────────────────────────────────── */
+  /* Firestore listeners */
   void _attachFirestoreStreams() {
     final uid = FirebaseAuth.instance.currentUser!.uid;
 
@@ -430,7 +427,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         }).toList();
   }
 
-  /* ── helpers ──────────────────────────────────────────────── */
+  /* helpers */
   List<FileMeta> get _visibleFiles =>
       _selectedFolder == null
           ? _topLevelFiles
@@ -438,7 +435,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _clearPreview() => setState(() => _previewFile = null);
 
-  /* ── User Data Loading, Saving, and Tracking ────────────────── */
+  /* User Data Loading, Saving, and Tracking */
   Future<void> _saveUserData({bool isNewUser = false}) async {
     if (_user == null) return;
 
@@ -474,6 +471,34 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       debugPrint('✅ User data saved to Firestore');
     } catch (e) {
       debugPrint('Error saving user data: $e');
+    }
+  }
+
+  // Add this helper to keep dashboards/<uid> in sync with the counters
+  Future<void> _syncDashboardToFirestore() async {
+    if (_user == null) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('dashboards')
+          .doc(_user!.uid)
+          .set({
+            'filesUploaded': _filesUploaded,
+            'aiChatInteractions': _aiChatInteractions,
+            'questionsAnswered': _questionsAnswered,
+            'correctAnswers': _correctAnswers,
+            'loginDays': _loginDays,
+            'totalPoints': _totalPoints,
+            'weeklyUploads': _weeklyUploads,
+            'monthlyUploads': _monthlyUploads,
+            'userName': _userName,
+            'fileTypeStats': _fileTypeStats,
+            'dailyActivity': _dailyActivity,
+            'unlockedBadges': _unlockedBadges,
+            'recentAchievements': _recentAchievements,
+            'lastUpdated': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error syncing dashboard: $e');
     }
   }
 
@@ -538,9 +563,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _trackDailyActivity();
     _checkForNewAchievements();
     _saveUserData();
-    Provider.of<DashboardProvider>(context, listen: false).incrementPoints(5);
+    // Removed Provider.of<DashboardProvider>(...) to avoid dispose lookups
+    _syncDashboardToFirestore();
 
-    // Refresh dashboard if visible
     _dashboardKey.currentState?.refreshDashboard();
   }
 
@@ -558,6 +583,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _trackDailyActivity();
     _checkForNewAchievements();
     _saveUserData();
+    _syncDashboardToFirestore(); // <— keep dashboards/<uid> fresh
 
     // Refresh dashboard if visible
     _dashboardKey.currentState?.refreshDashboard();
@@ -578,6 +604,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _trackDailyActivity();
     _checkForNewAchievements();
     _saveUserData();
+    _syncDashboardToFirestore(); // <— keep dashboards/<uid> fresh
 
     // Refresh dashboard if visible
     _dashboardKey.currentState?.refreshDashboard();
@@ -604,9 +631,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _loginDays++;
           _totalPoints += 5; // Daily login reward
         });
+        _trackDailyActivity();
         _checkForNewAchievements();
+        _saveUserData();
+        _syncDashboardToFirestore(); // <— keep dashboards/<uid> fresh
         if (_loginDays % 3 == 0) {
-          // Notify every 3-day streak as an example
           _showStreakNotification(_loginDays);
         }
       } else if (difference > 1) {
@@ -614,13 +643,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _loginDays = 1;
           _totalPoints += 5;
         });
+        _trackDailyActivity();
+        _checkForNewAchievements();
+        _saveUserData();
+        _syncDashboardToFirestore(); // <— keep dashboards/<uid> fresh
       }
-      // If difference is 0, do nothing
     } else {
       setState(() {
         _loginDays = 1;
         _totalPoints += 5;
       });
+      _trackDailyActivity();
+      _checkForNewAchievements();
+      await _saveUserData();
+      _syncDashboardToFirestore(); // <— keep dashboards/<uid> fresh
     }
 
     // New code for streak milestones
@@ -629,7 +665,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     _lastLoginDate = now;
-    await _saveUserData();
   }
 
   // Implement periodic backup
@@ -981,7 +1016,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     },
   );
 
-  /* ── folder creation dialog ───────────────────────────────── */
+  /* folder creation dialog */
   void _createFolderDialog() {
     final ctl = TextEditingController();
     showDialog(
@@ -1049,7 +1084,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  /* ── file picker & uploads ───────────────────────────────── */
+  /* file picker & uploads */
   Future<void> _pickFiles() async {
     final res = await FilePicker.platform.pickFiles(
       allowMultiple: true,
@@ -1183,7 +1218,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /* ── data deletion & modification ─────────────────────────── */
+  /* data deletion & modification */
 
   // These are the public-facing methods that include dialogs.
   // They call the private "_" methods to do the actual work.
@@ -1434,7 +1469,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  /* ── misc helpers ─────────────────────────────────────────── */
+  /* misc helpers */
   Future<void> _openUrl(String url) async {
     final uri = Uri.parse(url);
     if (await canLaunchUrl(uri)) {
@@ -1451,7 +1486,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  /* ── drag & drop operations ─────────────────────────────── */
+  /* drag & drop operations */
   Future<void> _moveFile(FileMeta file, String? targetFolderId) async {
     // Prevent moving a file to its current location
     if (file.folderId == targetFolderId) return;
@@ -1564,6 +1599,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     setState(() {
       _dailyActivity[key] = (_dailyActivity[key] ?? 0) + 1;
     });
+    _syncDashboardToFirestore(); // <— quickly reflect daily activity blocks
   }
 }
 

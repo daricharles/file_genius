@@ -68,19 +68,39 @@ class DashboardScreenState extends State<DashboardScreen> {
   // Timer for refresh
   Timer? _refreshTimer;
 
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
+  _dashboardSubscription; // <— add
+
   @override
   void initState() {
     super.initState();
-    _fetchUserName(); // Fetch the real user name
+    _fetchUserName();
     _loadDashboardData();
-    _refreshTimer = Timer.periodic(const Duration(minutes: 5), (_) {
-      _loadDashboardData();
-    });
+
+    // Optional: remove periodic polling since we have a real-time listener now
+    // _refreshTimer = Timer.periodic(const Duration(minutes: 5), (_) {
+    //   _loadDashboardData();
+    // });
+
+    _dashboardSubscription = _firestore
+        .collection('dashboards')
+        .doc(widget.userId)
+        .snapshots()
+        .listen((snapshot) {
+          if (!mounted) return;
+          final data = snapshot.data();
+          if (data != null) {
+            setState(() {
+              _applyDashboardData(data);
+            });
+          }
+        });
   }
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _dashboardSubscription?.cancel(); // <— cancel stream
     super.dispose();
   }
 
@@ -178,47 +198,7 @@ class DashboardScreenState extends State<DashboardScreen> {
     if (snapshot.exists) {
       final data = snapshot.data() as Map<String, dynamic>;
       setState(() {
-        _filesUploaded = data['filesUploaded'] ?? _filesUploaded;
-        _aiChatInteractions = data['aiChatInteractions'] ?? _aiChatInteractions;
-        _questionsAnswered = data['questionsAnswered'] ?? _questionsAnswered;
-        _correctAnswers = data['correctAnswers'] ?? _correctAnswers;
-        _loginDays = data['loginDays'] ?? _loginDays;
-        _totalPoints = data['totalPoints'] ?? _totalPoints;
-        _weeklyUploads = data['weeklyUploads'] ?? _weeklyUploads;
-        _monthlyUploads = data['monthlyUploads'] ?? _monthlyUploads;
-        _userName = data['userName'] ?? _userName;
-        _totalStudyTime =
-            (data['totalStudyTime'] ?? _totalStudyTime).toDouble();
-        _averageAccuracy =
-            (data['averageAccuracy'] ?? _averageAccuracy).toDouble();
-        _preferredStudyTime = data['preferredStudyTime'] ?? _preferredStudyTime;
-
-        // Update complex data structures
-        _fileTypeStats = Map<String, int>.from(
-          data['fileTypeStats'] ?? _fileTypeStats,
-        );
-        _dailyActivity = Map<String, int>.from(
-          data['dailyActivity'] ?? _dailyActivity,
-        );
-        _unlockedBadges = List<String>.from(
-          data['unlockedBadges'] ?? _unlockedBadges,
-        );
-        _recentAchievements = List<String>.from(
-          data['recentAchievements'] ?? _recentAchievements,
-        );
-        _studyTimeBySubject = Map<String, double>.from(
-          data['studyTimeBySubject'] ?? _studyTimeBySubject,
-        );
-        _weakAreas = List<String>.from(data['weakAreas'] ?? _weakAreas);
-        _performanceHistory = List<Map<String, dynamic>>.from(
-          data['performanceHistory'] ?? _performanceHistory,
-        );
-        _weeklyPerformance = Map<String, int>.from(
-          data['weeklyPerformance'] ?? _weeklyPerformance,
-        );
-        _aiRecommendations = List<Map<String, dynamic>>.from(
-          data['aiRecommendations'] ?? _aiRecommendations,
-        );
+        _applyDashboardData(data); // <— reuse
       });
     } else {
       // If no data exists in Firestore, create an initial document.
@@ -227,6 +207,48 @@ class DashboardScreenState extends State<DashboardScreen> {
         await _saveToFirestore();
       }
     }
+  }
+
+  // <— Factor common assignment logic here (no setState inside)
+  void _applyDashboardData(Map<String, dynamic> data) {
+    _filesUploaded = data['filesUploaded'] ?? _filesUploaded;
+    _aiChatInteractions = data['aiChatInteractions'] ?? _aiChatInteractions;
+    _questionsAnswered = data['questionsAnswered'] ?? _questionsAnswered;
+    _correctAnswers = data['correctAnswers'] ?? _correctAnswers;
+    _loginDays = data['loginDays'] ?? _loginDays;
+    _totalPoints = data['totalPoints'] ?? _totalPoints;
+    _weeklyUploads = data['weeklyUploads'] ?? _weeklyUploads;
+    _monthlyUploads = data['monthlyUploads'] ?? _monthlyUploads;
+    _userName = data['userName'] ?? _userName;
+    _totalStudyTime = (data['totalStudyTime'] ?? _totalStudyTime).toDouble();
+    _averageAccuracy = (data['averageAccuracy'] ?? _averageAccuracy).toDouble();
+    _preferredStudyTime = data['preferredStudyTime'] ?? _preferredStudyTime;
+
+    _fileTypeStats = Map<String, int>.from(
+      data['fileTypeStats'] ?? _fileTypeStats,
+    );
+    _dailyActivity = Map<String, int>.from(
+      data['dailyActivity'] ?? _dailyActivity,
+    );
+    _unlockedBadges = List<String>.from(
+      data['unlockedBadges'] ?? _unlockedBadges,
+    );
+    _recentAchievements = List<String>.from(
+      data['recentAchievements'] ?? _recentAchievements,
+    );
+    _studyTimeBySubject = Map<String, double>.from(
+      data['studyTimeBySubject'] ?? _studyTimeBySubject,
+    );
+    _weakAreas = List<String>.from(data['weakAreas'] ?? _weakAreas);
+    _performanceHistory = List<Map<String, dynamic>>.from(
+      data['performanceHistory'] ?? _performanceHistory,
+    );
+    _weeklyPerformance = Map<String, int>.from(
+      data['weeklyPerformance'] ?? _weeklyPerformance,
+    );
+    _aiRecommendations = List<Map<String, dynamic>>.from(
+      data['aiRecommendations'] ?? _aiRecommendations,
+    );
   }
 
   Future<void> _saveToCache() async {
@@ -301,6 +323,7 @@ class DashboardScreenState extends State<DashboardScreen> {
     try {
       final userDoc =
           await _firestore.collection('users').doc(widget.userId).get();
+      if (!mounted) return; // guard after await
       if (userDoc.exists && userDoc.data() != null) {
         final data = userDoc.data()!;
         setState(() {
@@ -308,7 +331,7 @@ class DashboardScreenState extends State<DashboardScreen> {
         });
       }
     } catch (e) {
-      // Optionally handle error
+      if (!mounted) return;
       setState(() {
         _userName = 'User';
       });
@@ -650,48 +673,68 @@ class DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildMainMetrics() {
-    return Row(
-      children: [
-        Expanded(
-          child: _buildMetricCard(
-            'Files Uploaded',
-            _filesUploaded.toString(),
-            Icons.cloud_upload,
-            Colors.blue,
-            '+$_weeklyUploads this week',
-          ),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: _buildMetricCard(
-            'Questions Answered',
-            _questionsAnswered.toString(),
-            Icons.quiz,
-            Colors.green,
-            '${_correctAnswers > 0 ? ((_correctAnswers / _questionsAnswered) * 100).toInt() : 0}% accuracy',
-          ),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: _buildMetricCard(
-            'AI Interactions',
-            _aiChatInteractions.toString(),
-            Icons.smart_toy,
-            Colors.purple,
-            'Explore more!',
-          ),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: _buildMetricCard(
-            'Login Streak',
-            '$_loginDays days',
-            Icons.local_fire_department,
-            Colors.orange,
-            'Keep it up!',
-          ),
-        ),
-      ],
+    // Use Wrap for responsiveness to avoid overflow on small widths
+    final items = <Widget>[
+      _buildMetricCard(
+        'Files Uploaded',
+        _filesUploaded.toString(),
+        Icons.cloud_upload,
+        Colors.blue,
+        '+$_weeklyUploads this week',
+      ),
+      _buildMetricCard(
+        'Questions Answered',
+        _questionsAnswered.toString(),
+        Icons.quiz,
+        Colors.green,
+        '${_questionsAnswered > 0 ? ((_correctAnswers / _questionsAnswered) * 100).toInt() : 0}% accuracy',
+      ),
+      _buildMetricCard(
+        'AI Interactions',
+        _aiChatInteractions.toString(),
+        Icons.smart_toy,
+        Colors.purple,
+        'Explore more!',
+      ),
+      _buildMetricCard(
+        'Login Streak',
+        '$_loginDays days',
+        Icons.local_fire_department,
+        Colors.orange,
+        'Keep it up!',
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 1000;
+        if (isNarrow) {
+          return Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            children:
+                items
+                    .map(
+                      (w) => SizedBox(
+                        width: constraints.maxWidth / 2 - 12,
+                        child: w,
+                      ),
+                    )
+                    .toList(),
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: items[0]),
+            const SizedBox(width: 16),
+            Expanded(child: items[1]),
+            const SizedBox(width: 16),
+            Expanded(child: items[2]),
+            const SizedBox(width: 16),
+            Expanded(child: items[3]),
+          ],
+        );
+      },
     );
   }
 
@@ -756,8 +799,10 @@ class DashboardScreenState extends State<DashboardScreen> {
 
   Widget _buildBadgeSystem() {
     final badges = _getBadgeDefinitions();
-    final unlockedCount =
-        badges.where((badge) => badge['unlocked'] as bool).length;
+    final unlockedCount = badges.where((b) => b['unlocked'] as bool).length;
+
+    // Use dynamic crossAxisCount to avoid overflow on small widths
+    final crossAxisCount = MediaQuery.of(context).size.width < 1100 ? 4 : 6;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -806,8 +851,8 @@ class DashboardScreenState extends State<DashboardScreen> {
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 6,
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: crossAxisCount,
               crossAxisSpacing: 8,
               mainAxisSpacing: 8,
               childAspectRatio: 0.9,
