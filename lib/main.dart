@@ -269,6 +269,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, List<FileMeta>> _filesByFolder = {};
   final Set<String> _collapsed = {};
 
+  // ADD THIS LINE - Dashboard key for refreshing
+  final GlobalKey<DashboardScreenState> _dashboardKey =
+      GlobalKey<DashboardScreenState>();
+
   Folder? _selectedFolder; // highlighted in tree
   FileMeta? _previewFile; // shown in right‑hand viewer
   List<StreamSubscription> _folderSubs = [];
@@ -298,13 +302,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // Timer? _inactivityTimer; // Add this field to your state class:
 
-  // Add this field to your state class:
-  final List<int> _streakMilestones = [3, 7, 14, 30, 100];
-
-  // Add this field to your _HomeScreenState:
-  final GlobalKey<DashboardScreenState> _dashboardKey =
-      GlobalKey<DashboardScreenState>();
-
   /* life‑cycle */
   @override
   void initState() {
@@ -312,8 +309,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _user = FirebaseAuth.instance.currentUser;
     _attachFirestoreStreams();
-    _loadUserData();
-    _trackLoginDay();
+
+    // FIXED: Load data first, then track login
+    _loadUserData().then((_) {
+      _trackLoginDay();
+      _syncDashboardToFirestore(); // Use the correct method name
+    });
 
     _backupTimer = Timer.periodic(
       const Duration(minutes: 5),
@@ -517,24 +518,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
       if (doc.exists) {
         final data = doc.data()!;
-        // Load stats from Firestore
+
+        // CRITICAL FIX: Actually load the data into state variables
         setState(() {
           _filesUploaded = data['filesUploaded'] ?? 0;
           _aiChatInteractions = data['aiChatInteractions'] ?? 0;
           _questionsAnswered = data['questionsAnswered'] ?? 0;
           _correctAnswers = data['correctAnswers'] ?? 0;
-          _totalPoints = data['totalPoints'] ?? 0;
           _loginDays = data['loginDays'] ?? 0;
+          _totalPoints = data['totalPoints'] ?? 0;
+          _weeklyUploads = data['weeklyUploads'] ?? 0;
+          _monthlyUploads = data['monthlyUploads'] ?? 0;
+
+          // Load complex data structures
           _unlockedBadges = List<String>.from(data['unlockedBadges'] ?? []);
           _recentAchievements = List<String>.from(
             data['recentAchievements'] ?? [],
           );
-          _userName = data['displayName'] ?? _user!.email ?? 'User';
           _fileTypeStats = Map<String, int>.from(data['fileTypeStats'] ?? {});
           _dailyActivity = Map<String, int>.from(data['dailyActivity'] ?? {});
-          _weeklyUploads = data['weeklyUploads'] ?? 0;
-          _monthlyUploads = data['monthlyUploads'] ?? 0;
 
+          // Load user name
+          _userName = data['displayName'] ?? data['userName'] ?? 'User';
+
+          // Handle lastLoginDate properly
           final lastLoginTimestamp = data['lastLoginDate'] as Timestamp?;
           _lastLoginDate = lastLoginTimestamp?.toDate();
         });
@@ -562,11 +569,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
     _trackDailyActivity();
     _checkForNewAchievements();
+
+    // Make sure data is saved
     _saveUserData();
-    // Removed Provider.of<DashboardProvider>(...) to avoid dispose lookups
     _syncDashboardToFirestore();
 
-    _dashboardKey.currentState?.refreshDashboard();
+    // Force dashboard refresh with a delay to ensure Firestore write completes
+    Future.delayed(const Duration(milliseconds: 500), () {
+      _dashboardKey.currentState?.refreshDashboard();
+    });
   }
 
   void _onFileUploadSuccess(FileMeta file) {
@@ -582,11 +593,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     _trackDailyActivity();
     _checkForNewAchievements();
-    _saveUserData();
-    _syncDashboardToFirestore(); // <— keep dashboards/<uid> fresh
 
-    // Refresh dashboard if visible
-    _dashboardKey.currentState?.refreshDashboard();
+    // Make sure data is saved
+    _saveUserData();
+    _syncDashboardToFirestore();
+
+    // Force dashboard refresh with a delay
+    Future.delayed(const Duration(milliseconds: 500), () {
+      _dashboardKey.currentState?.refreshDashboard();
+    });
   }
 
   void onQuizAnswerSubmitted(bool isCorrect) {
@@ -603,11 +618,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     _trackDailyActivity();
     _checkForNewAchievements();
-    _saveUserData();
-    _syncDashboardToFirestore(); // <— keep dashboards/<uid> fresh
 
-    // Refresh dashboard if visible
-    _dashboardKey.currentState?.refreshDashboard();
+    // Make sure data is saved
+    _saveUserData();
+    _syncDashboardToFirestore();
+
+    // Force dashboard refresh with a delay
+    Future.delayed(const Duration(milliseconds: 500), () {
+      _dashboardKey.currentState?.refreshDashboard();
+    });
   }
 
   // Ensure consistent login day tracking
@@ -627,28 +646,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final difference = today.difference(lastLoginDay).inDays;
 
       if (difference == 1) {
+        // Consecutive day - increment streak
         setState(() {
-          _loginDays++;
+          _loginDays++; // FIX: Increment the streak
           _totalPoints += 5; // Daily login reward
         });
         _trackDailyActivity();
         _checkForNewAchievements();
-        _saveUserData();
-        _syncDashboardToFirestore(); // <— keep dashboards/<uid> fresh
+        await _saveUserData(); // FIX: Make sure to await
+        _syncDashboardToFirestore();
+
         if (_loginDays % 3 == 0) {
           _showStreakNotification(_loginDays);
         }
       } else if (difference > 1) {
+        // Streak broken - reset to 1
         setState(() {
-          _loginDays = 1;
+          _loginDays = 1; // FIX: Reset streak to 1, not keep current
           _totalPoints += 5;
         });
         _trackDailyActivity();
         _checkForNewAchievements();
-        _saveUserData();
-        _syncDashboardToFirestore(); // <— keep dashboards/<uid> fresh
+        await _saveUserData(); // FIX: Make sure to await
+        _syncDashboardToFirestore();
       }
+      // If difference == 0, it's the same day, so don't change anything
     } else {
+      // First time login
       setState(() {
         _loginDays = 1;
         _totalPoints += 5;
@@ -656,15 +680,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _trackDailyActivity();
       _checkForNewAchievements();
       await _saveUserData();
-      _syncDashboardToFirestore(); // <— keep dashboards/<uid> fresh
+      _syncDashboardToFirestore();
     }
 
-    // New code for streak milestones
-    if (_streakMilestones.contains(_loginDays)) {
-      _showStreakNotification(_loginDays);
-    }
-
+    // Update last login date
     _lastLoginDate = now;
+    await _saveUserData(); // Save the updated login date
   }
 
   // Implement periodic backup
@@ -689,9 +710,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _recentAchievements.add('File Master');
     }
 
+    if (_filesUploaded >= 50 && !_unlockedBadges.contains('file_expert')) {
+      newBadges.add('file_expert');
+      _recentAchievements.add('File Expert');
+    }
+
     if (_aiChatInteractions >= 5 && !_unlockedBadges.contains('ai_explorer')) {
       newBadges.add('ai_explorer');
       _recentAchievements.add('AI Explorer');
+    }
+
+    if (_correctAnswers >= 20 && !_unlockedBadges.contains('quiz_master')) {
+      newBadges.add('quiz_master');
+      _recentAchievements.add('Quiz Master');
     }
 
     if (_totalPoints >= 100 && !_unlockedBadges.contains('century_club')) {
@@ -699,9 +730,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _recentAchievements.add('Century Club');
     }
 
-    if (_loginDays >= 7 && !_unlockedBadges.contains('week_warrior')) {
-      newBadges.add('week_warrior');
-      _recentAchievements.add('Week Warrior');
+    if (_totalPoints >= 500 && !_unlockedBadges.contains('point_prodigy')) {
+      newBadges.add('point_prodigy');
+      _recentAchievements.add('Point Prodigy');
+    }
+
+    if (_questionsAnswered >= 100 && !_unlockedBadges.contains('scholar')) {
+      newBadges.add('scholar');
+      _recentAchievements.add('Scholar');
+    }
+
+    if (_correctAnswers >= 50 && !_unlockedBadges.contains('genius')) {
+      newBadges.add('genius');
+      _recentAchievements.add('Genius');
+    }
+
+    if (_totalPoints >= 1000 && !_unlockedBadges.contains('legendary')) {
+      newBadges.add('legendary');
+      _recentAchievements.add('Legendary');
+    }
+
+    // Add streak milestones
+    if (_loginDays >= 30 && !_unlockedBadges.contains('month_master')) {
+      newBadges.add('month_master');
+      _recentAchievements.add('Month Master');
     }
 
     // Add new badges to unlocked list
@@ -711,6 +763,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_recentAchievements.length > 5) {
       _recentAchievements =
           _recentAchievements.skip(_recentAchievements.length - 5).toList();
+    }
+
+    // CRITICAL: Save immediately after unlocking achievements
+    if (newBadges.isNotEmpty) {
+      _saveUserData();
+      _syncDashboardToFirestore();
     }
 
     // Show achievement dialog for new badges
@@ -744,19 +802,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         };
       case 'file_master':
         return {'title': 'File Master!', 'icon': Icons.folder, 'points': 100};
+      case 'file_expert':
+        return {
+          'title': 'File Expert!',
+          'icon': Icons.workspace_premium,
+          'points': 150,
+        };
       case 'ai_explorer':
         return {'title': 'AI Explorer!', 'icon': Icons.smart_toy, 'points': 75};
+      case 'quiz_master':
+        return {'title': 'Quiz Master!', 'icon': Icons.quiz, 'points': 200};
       case 'century_club':
         return {
           'title': 'Century Club!',
           'icon': Icons.military_tech,
           'points': 200,
         };
+      case 'point_prodigy':
+        return {
+          'title': 'Point Prodigy!',
+          'icon': Icons.diamond,
+          'points': 300,
+        };
       case 'week_warrior':
         return {
           'title': 'Week Warrior!',
           'icon': Icons.emoji_events,
           'points': 150,
+        };
+      case 'month_master':
+        return {'title': 'Month Master!', 'icon': Icons.stars, 'points': 250};
+      case 'scholar':
+        return {'title': 'Scholar!', 'icon': Icons.school, 'points': 250};
+      case 'genius':
+        return {'title': 'Genius!', 'icon': Icons.psychology, 'points': 300};
+      case 'legendary':
+        return {
+          'title': 'Legendary!',
+          'icon': Icons.auto_awesome,
+          'points': 500,
         };
       default:
         return {'title': 'Achievement!', 'icon': Icons.star, 'points': 25};
@@ -891,7 +975,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       Widget content;
       if (_showDashboard) {
         content = DashboardScreen(
-          key: _dashboardKey,
+          key: _dashboardKey, // Add this line
           userId: _user!.uid,
           onBackPressed: () {
             setState(() {

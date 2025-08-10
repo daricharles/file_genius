@@ -77,11 +77,6 @@ class DashboardScreenState extends State<DashboardScreen> {
     _fetchUserName();
     _loadDashboardData();
 
-    // Optional: remove periodic polling since we have a real-time listener now
-    // _refreshTimer = Timer.periodic(const Duration(minutes: 5), (_) {
-    //   _loadDashboardData();
-    // });
-
     _dashboardSubscription = _firestore
         .collection('dashboards')
         .doc(widget.userId)
@@ -89,9 +84,12 @@ class DashboardScreenState extends State<DashboardScreen> {
         .listen((snapshot) {
           if (!mounted) return;
           final data = snapshot.data();
-          if (data != null) {
+          if (data != null && mounted) {
+            // Add null check here
             setState(() {
-              _applyDashboardData(data);
+              _applyDashboardData(
+                data,
+              ); // Now data is guaranteed to be non-null
             });
           }
         });
@@ -187,25 +185,39 @@ class DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _fetchFromFirestore() async {
-    if (!mounted) return; // Add check at start
+    if (!mounted) return;
 
-    // Document reference for the user's dashboard data
-    final docRef = _firestore.collection('dashboards').doc(widget.userId);
-    final snapshot = await docRef.get();
+    try {
+      // Try both collections to get the most recent data
+      final dashboardDoc =
+          await _firestore.collection('dashboards').doc(widget.userId).get();
+      final userDoc =
+          await _firestore.collection('users').doc(widget.userId).get();
 
-    if (!mounted) return; // Check again after async operation
+      if (!mounted) return;
 
-    if (snapshot.exists) {
-      final data = snapshot.data() as Map<String, dynamic>;
-      setState(() {
-        _applyDashboardData(data); // <— reuse
-      });
-    } else {
-      // If no data exists in Firestore, create an initial document.
-      // This is useful for new users.
-      if (mounted) {
-        await _saveToFirestore();
+      Map<String, dynamic>? data;
+
+      // Prefer dashboard data if it exists and is recent, otherwise use user data
+      if (dashboardDoc.exists) {
+        data = dashboardDoc.data();
+      } else if (userDoc.exists) {
+        data = userDoc.data();
       }
+
+      if (data != null && mounted) {
+        // Add null check here
+        setState(() {
+          _applyDashboardData(data!); // Use ! to assert non-null
+        });
+      } else {
+        // Create initial document
+        if (mounted) {
+          await _saveToFirestore();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error fetching from Firestore: $e');
     }
   }
 
@@ -340,7 +352,22 @@ class DashboardScreenState extends State<DashboardScreen> {
 
   // Expose a public refresh method
   Future<void> refreshDashboard() async {
-    await _loadDashboardData();
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      await _fetchFromFirestore();
+      await _saveToCache();
+    } catch (e) {
+      debugPrint('Error refreshing dashboard: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   @override
@@ -1516,83 +1543,73 @@ class DashboardScreenState extends State<DashboardScreen> {
       {
         'icon': Icons.upload_file,
         'label': 'First Upload',
-        'unlocked':
-            _unlockedBadges.contains('first_file') || _filesUploaded >= 1,
+        'unlocked': _unlockedBadges.contains('first_file'),
         'description': 'Upload your first file ($_filesUploaded/1)',
       },
       {
         'icon': Icons.folder,
         'label': 'File Master',
-        'unlocked':
-            _unlockedBadges.contains('file_master') || _filesUploaded >= 10,
+        'unlocked': _unlockedBadges.contains('file_master'),
         'description': 'Upload 10 files ($_filesUploaded/10)',
       },
       {
         'icon': Icons.workspace_premium,
         'label': 'File Expert',
-        'unlocked':
-            _unlockedBadges.contains('file_expert') || _filesUploaded >= 50,
+        'unlocked': _unlockedBadges.contains('file_expert'),
         'description': 'Upload 50 files ($_filesUploaded/50)',
       },
       {
         'icon': Icons.emoji_events,
         'label': 'Week Warrior',
-        'unlocked': _unlockedBadges.contains('week_warrior') || _loginDays >= 7,
+        'unlocked': _unlockedBadges.contains('week_warrior'),
         'description': 'Login for 7 consecutive days ($_loginDays/7)',
       },
       {
         'icon': Icons.stars,
         'label': 'Month Master',
-        'unlocked':
-            _unlockedBadges.contains('month_master') || _loginDays >= 30,
+        'unlocked': _unlockedBadges.contains('month_master'),
         'description': 'Login for 30 consecutive days ($_loginDays/30)',
       },
       {
         'icon': Icons.smart_toy,
         'label': 'AI Explorer',
-        'unlocked':
-            _unlockedBadges.contains('ai_explorer') || _aiChatInteractions >= 5,
+        'unlocked': _unlockedBadges.contains('ai_explorer'),
         'description': 'Use AI chat 5 times ($_aiChatInteractions/5)',
       },
       {
         'icon': Icons.quiz,
         'label': 'Quiz Master',
-        'unlocked':
-            _unlockedBadges.contains('quiz_master') || _correctAnswers >= 20,
+        'unlocked': _unlockedBadges.contains('quiz_master'),
         'description': 'Answer 20 questions correctly ($_correctAnswers/20)',
       },
       {
         'icon': Icons.military_tech,
         'label': 'Century Club',
-        'unlocked':
-            _unlockedBadges.contains('century_club') || _totalPoints >= 100,
+        'unlocked': _unlockedBadges.contains('century_club'),
         'description': 'Earn 100 XP ($_totalPoints/100)',
       },
       {
         'icon': Icons.diamond,
         'label': 'Point Prodigy',
-        'unlocked':
-            _unlockedBadges.contains('point_prodigy') || _totalPoints >= 500,
+        'unlocked': _unlockedBadges.contains('point_prodigy'),
         'description': 'Earn 500 XP ($_totalPoints/500)',
       },
       {
         'icon': Icons.school,
         'label': 'Scholar',
-        'unlocked':
-            _unlockedBadges.contains('scholar') || _questionsAnswered >= 100,
+        'unlocked': _unlockedBadges.contains('scholar'),
         'description': 'Answer 100 questions ($_questionsAnswered/100)',
       },
       {
         'icon': Icons.psychology,
         'label': 'Genius',
-        'unlocked': _unlockedBadges.contains('genius') || _correctAnswers >= 50,
+        'unlocked': _unlockedBadges.contains('genius'),
         'description': 'Get 50 correct answers ($_correctAnswers/50)',
       },
       {
         'icon': Icons.auto_awesome,
         'label': 'Legendary',
-        'unlocked':
-            _unlockedBadges.contains('legendary') || _totalPoints >= 1000,
+        'unlocked': _unlockedBadges.contains('legendary'),
         'description': 'Reach 1000 XP ($_totalPoints/1000)',
       },
     ];
