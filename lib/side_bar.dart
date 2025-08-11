@@ -31,6 +31,7 @@ class FileGeniusSidebar extends StatelessWidget {
   final Future<void> Function(Folder folder)? onDeleteFolder;
   final Future<void> Function(Folder folder, String newName)? onRenameFolder;
   final Future<void> Function(FileMeta file)? onDeleteFile;
+  final VoidCallback? onUserProfilePressed; // Add this line
 
   const FileGeniusSidebar({
     super.key,
@@ -57,6 +58,7 @@ class FileGeniusSidebar extends StatelessWidget {
     this.onDeleteFolder,
     this.onRenameFolder,
     this.onDeleteFile,
+    this.onUserProfilePressed, // Add this line
   });
 
   Widget _topFileTile(BuildContext context, FileMeta f) {
@@ -477,7 +479,11 @@ class FileGeniusSidebar extends StatelessWidget {
               ),
             ),
             const Divider(height: 24),
-            _UserSection(onSignOut: onSignOut, onUpgradePlan: onUpgradePlan),
+            _UserSection(
+              onSignOut: onSignOut,
+              onUpgradePlan: onUpgradePlan,
+              onUserProfilePressed: onUserProfilePressed,
+            ), // Pass the callback here
           ],
         ],
       ),
@@ -541,9 +547,14 @@ class _SidebarButtonState extends State<_SidebarButton> {
 }
 
 class _UserSection extends StatelessWidget {
-  const _UserSection({required this.onSignOut, required this.onUpgradePlan});
+  const _UserSection({
+    required this.onSignOut,
+    required this.onUpgradePlan,
+    this.onUserProfilePressed,
+  });
   final VoidCallback onSignOut;
   final VoidCallback onUpgradePlan;
+  final VoidCallback? onUserProfilePressed; // Add this line
 
   @override
   Widget build(BuildContext context) {
@@ -560,28 +571,54 @@ class _UserSection extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          CircleAvatar(
-            backgroundColor: kBrand,
-            radius: 24,
-            backgroundImage:
-                user?.photoURL != null ? NetworkImage(user!.photoURL!) : null,
-            child:
-                user?.photoURL == null
-                    ? Text(
-                      avatarText,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 20,
-                      ),
-                    )
-                    : null,
+          GestureDetector(
+            onTap: () {
+              // Navigate to user profile
+              // Instead of Navigator.push, use a callback to show in main pane
+              onUserProfilePressed?.call();
+            },
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: CircleAvatar(
+                backgroundColor: kBrand,
+                radius: 24,
+                backgroundImage:
+                    user?.photoURL != null
+                        ? NetworkImage(user!.photoURL!)
+                        : null,
+                child:
+                    user?.photoURL == null
+                        ? Text(
+                          avatarText,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                          ),
+                        )
+                        : null,
+              ),
+            ),
           ),
           const SizedBox(height: 8),
-          Text(
-            displayName ?? email ?? 'User',
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontWeight: FontWeight.w600),
+          GestureDetector(
+            onTap: () {
+              // Navigate to user profile
+              // Instead of Navigator.push, use a callback to show in main pane
+              onUserProfilePressed?.call();
+            },
+            child: MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: Text(
+                displayName ?? email ?? 'User',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: Colors.blue,
+                  decoration: TextDecoration.underline,
+                ),
+              ),
+            ),
           ),
           const SizedBox(height: 2),
           // Example plan badge
@@ -783,6 +820,24 @@ class _FileGeniusSidebarContainerState
       onDeleteFolder: _handleDeleteFolder,
       onRenameFolder: _handleRenameFolder,
       onDeleteFile: _handleDeleteFile,
+      onUserProfilePressed: () {
+        // Handle user profile navigation
+        // For example, you can show a dialog with user info
+        showDialog(
+          context: context,
+          builder:
+              (ctx) => AlertDialog(
+                title: const Text('User Profile'),
+                content: const Text('User profile details go here.'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: const Text('Close'),
+                  ),
+                ],
+              ),
+        );
+      },
     );
   }
 }

@@ -5,7 +5,6 @@
 // ignore_for_file: prefer_final_fields
 
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -36,6 +35,7 @@ import 'side_bar.dart';
 import 'main_pane.dart';
 import 'models.dart';
 import 'dash_board.dart';
+import 'user_profile.dart';
 
 /// Achievement notification dialog with animations
 class AchievementDialog extends StatefulWidget {
@@ -301,6 +301,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   DateTime? _lastActivityTime;
 
   // Timer? _inactivityTimer; // Add this field to your state class:
+
+  // ADD THIS LINE
+  bool _showUserProfile = false;
 
   /* life‑cycle */
   @override
@@ -631,61 +634,59 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // Ensure consistent login day tracking
   Future<void> _trackLoginDay() async {
-    if (_user == null) return;
-    await Future.delayed(const Duration(seconds: 1));
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null || !mounted) return; // Add mounted check
 
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+      await Future.delayed(const Duration(seconds: 1));
 
-    if (_lastLoginDate != null) {
-      final lastLoginDay = DateTime(
-        _lastLoginDate!.year,
-        _lastLoginDate!.month,
-        _lastLoginDate!.day,
-      );
-      final difference = today.difference(lastLoginDay).inDays;
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
 
-      if (difference == 1) {
-        // Consecutive day - increment streak
-        setState(() {
-          _loginDays++; // FIX: Increment the streak
-          _totalPoints += 5; // Daily login reward
-        });
-        _trackDailyActivity();
-        _checkForNewAchievements();
-        await _saveUserData(); // FIX: Make sure to await
-        _syncDashboardToFirestore();
-
-        if (_loginDays % 3 == 0) {
-          _showStreakNotification(_loginDays);
-        }
-      } else if (difference > 1) {
-        // Streak broken - reset to 1
-        setState(() {
-          _loginDays = 1; // FIX: Reset streak to 1, not keep current
-          _totalPoints += 5;
-        });
-        _trackDailyActivity();
-        _checkForNewAchievements();
-        await _saveUserData(); // FIX: Make sure to await
-        _syncDashboardToFirestore();
+      int? difference;
+      if (_lastLoginDate != null) {
+        final last = DateTime(
+          _lastLoginDate!.year,
+          _lastLoginDate!.month,
+          _lastLoginDate!.day,
+        );
+        difference = today.difference(last).inDays;
       }
-      // If difference == 0, it's the same day, so don't change anything
-    } else {
-      // First time login
+
       setState(() {
-        _loginDays = 1;
-        _totalPoints += 5;
+        if (_lastLoginDate == null) {
+          // First ever login
+          _loginDays = 1;
+          _totalPoints += 5;
+        } else if (difference == 1) {
+          _loginDays += 1;
+          _totalPoints += 5;
+        } else if (difference != null && difference > 1) {
+          // Streak broken
+          _loginDays = 1;
+          _totalPoints += 5;
+        }
+        // Always update lastLoginDate BEFORE saving so persistence is correct
+        _lastLoginDate = now;
       });
+
       _trackDailyActivity();
       _checkForNewAchievements();
-      await _saveUserData();
-      _syncDashboardToFirestore();
-    }
 
-    // Update last login date
-    _lastLoginDate = now;
-    await _saveUserData(); // Save the updated login date
+      await _saveUserData(); // now includes updated lastLoginDate
+      _syncDashboardToFirestore();
+
+      if (_loginDays % 3 == 0) {
+        _showStreakNotification(_loginDays);
+      }
+    } catch (e) {
+      if (mounted) {
+        // Add mounted check before showing snackbar
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    }
   }
 
   // Implement periodic backup
@@ -930,6 +931,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _backupAllProgressData();
           setState(() {
             _showDashboard = true;
+            _showUserProfile = false; // Add this line
             _selectedFolder = null;
             _previewFile = null;
           });
@@ -948,11 +950,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   id == null ? null : _folders.firstWhere((f) => f.id == id);
               _previewFile = null;
               _showDashboard = false;
+              _showUserProfile = false; // Add this line
             }),
         onSelectAnyFile:
             (file) => setState(() {
               _previewFile = file;
               _showDashboard = false;
+              _showUserProfile = false; // Add this line
             }),
         onSignOut: () async {
           _clearPreview(); // Clear preview on sign out
@@ -969,11 +973,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         onDeleteFolder: _handleDeleteFolder,
         onRenameFolder: _handleRenameFolder,
         onDeleteFile: _handleDeleteFile,
+        onUserProfilePressed:
+            () => setState(() {
+              // Add this callback
+              _showUserProfile = true;
+              _showDashboard = false;
+              _selectedFolder = null;
+              _previewFile = null;
+            }),
       );
 
       /* Main content area */
       Widget content;
-      if (_showDashboard) {
+      if (_showUserProfile) {
+        content = UserProfileScreen(
+          onBackPressed: () {
+            setState(() => _showUserProfile = false);
+          },
+        );
+      } else if (_showDashboard) {
         content = DashboardScreen(
           key: _dashboardKey, // Add this line
           userId: _user!.uid,
@@ -1684,102 +1702,5 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _dailyActivity[key] = (_dailyActivity[key] ?? 0) + 1;
     });
     _syncDashboardToFirestore(); // <— quickly reflect daily activity blocks
-  }
-}
-
-Future<void> saveDashboardDataToFirestore(
-  DashboardData data,
-  String userId,
-) async {
-  await FirebaseFirestore.instance
-      .collection('dashboards')
-      .doc(userId)
-      .set(data.toJson(), SetOptions(merge: true));
-}
-
-Future<void> saveDashboardDataToCache(DashboardData data) async {
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.setString('dashboardData', jsonEncode(data.toJson()));
-}
-
-class DashboardProvider extends ChangeNotifier {
-  DashboardData _data = DashboardData();
-
-  DashboardData get data => _data;
-
-  void update(DashboardData newData) {
-    _data = newData;
-    notifyListeners();
-  }
-
-  void updateField(String field, dynamic value) {
-    // Update a single field and notify
-    switch (field) {
-      case 'filesUploaded':
-        _data.filesUploaded = value;
-        break;
-      // ... handle other fields
-    }
-    notifyListeners();
-  }
-
-  // Add methods to increment points, uploads, etc.
-  void incrementPoints(int amount) {
-    _data.totalPoints += amount;
-    notifyListeners();
-  }
-
-  // ... add more as needed
-}
-
-class DashboardData {
-  int filesUploaded;
-  int aiChatInteractions;
-  int questionsAnswered;
-  int correctAnswers;
-  int loginDays;
-  int totalPoints;
-  int weeklyUploads;
-  int monthlyUploads;
-  Map<String, int> fileTypeStats;
-  Map<String, int> dailyActivity;
-  List<String> unlockedBadges;
-  List<String> recentAchievements;
-  String userName;
-
-  DashboardData({
-    this.filesUploaded = 0,
-    this.aiChatInteractions = 0,
-    this.questionsAnswered = 0,
-    this.correctAnswers = 0,
-    this.loginDays = 0,
-    this.totalPoints = 0,
-    this.weeklyUploads = 0,
-    this.monthlyUploads = 0,
-    Map<String, int>? fileTypeStats,
-    Map<String, int>? dailyActivity,
-    List<String>? unlockedBadges,
-    List<String>? recentAchievements,
-    this.userName = 'User',
-  }) : fileTypeStats = fileTypeStats ?? {},
-       dailyActivity = dailyActivity ?? {},
-       unlockedBadges = unlockedBadges ?? [],
-       recentAchievements = recentAchievements ?? [];
-  Map<String, dynamic> toJson() {
-    return {
-      'filesUploaded': filesUploaded,
-      'aiChatInteractions': aiChatInteractions,
-      'questionsAnswered': questionsAnswered,
-      'correctAnswers': correctAnswers,
-      'loginDays': loginDays,
-      'totalPoints': totalPoints,
-      'weeklyUploads': weeklyUploads,
-      'monthlyUploads': monthlyUploads,
-      'fileTypeStats': fileTypeStats,
-      'dailyActivity': dailyActivity,
-      'unlockedBadges': unlockedBadges,
-      'recentAchievements': recentAchievements,
-      'userName': userName,
-    };
   }
 }
