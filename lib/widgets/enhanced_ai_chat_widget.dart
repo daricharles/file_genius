@@ -8,6 +8,7 @@ import '../services/ai_service.dart';
 import '../services/conversation_manager.dart';
 import '../models/chat_models.dart';
 import 'package:intl/intl.dart';
+import '../services/speech_service.dart';
 
 class EnhancedAIChatWidget extends StatefulWidget {
   final String fileName;
@@ -38,11 +39,13 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   final AIService _aiService = AIService();
   final ConversationManager _conversationManager = ConversationManager.instance;
   final Uuid _uuid = const Uuid();
+  final SpeechService _speechService = SpeechService();
 
   ChatSession? _currentSession;
   bool _isLoading = false;
   bool _isInitializing = true;
   bool _aiTyping = false;
+  bool _isSpeechServiceInitialized = false;
 
   // UI State
   String? _selectedRole;
@@ -80,6 +83,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     super.initState();
     _initializeAnimations();
     _initializeChat();
+    _initializeSpeechService();
   }
 
   void _initializeAnimations() {
@@ -97,6 +101,13 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
 
   Future<void> _initializeChat() async {
     await _loadChatSession();
+  }
+
+  Future<void> _initializeSpeechService() async {
+    await _speechService.initialize();
+    setState(() {
+      _isSpeechServiceInitialized = true;
+    });
   }
 
   @override
@@ -814,6 +825,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             const Spacer(),
+                            // Bookmark button
                             IconButton(
                               onPressed: () => _bookmarkMessage(message.id),
                               icon: Icon(
@@ -833,7 +845,8 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                                       ? 'Remove bookmark'
                                       : 'Bookmark response',
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 4),
+                            // Copy button
                             IconButton(
                               onPressed: () {
                                 Clipboard.setData(
@@ -850,6 +863,65 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                               constraints: const BoxConstraints(),
                               tooltip: 'Copy response',
                             ),
+                            const SizedBox(width: 4),
+                            // TTS button
+                            if (_isSpeechServiceInitialized)
+                              ListenableBuilder(
+                                listenable: _speechService,
+                                builder: (context, child) {
+                                  return IconButton(
+                                    icon: Icon(
+                                      _speechService.isSpeaking &&
+                                              !_speechService.isPaused
+                                          ? Icons.volume_up
+                                          : _speechService.isPaused
+                                          ? Icons.pause
+                                          : Icons.volume_off,
+                                      size: 16,
+                                      color: Colors.grey[600],
+                                    ),
+                                    onPressed: () {
+                                      if (_speechService.isSpeaking) {
+                                        if (_speechService.isPaused) {
+                                          _speechService.speak(message.text);
+                                        } else {
+                                          _speechService.pause();
+                                        }
+                                      } else {
+                                        _speechService.speak(message.text);
+                                      }
+                                    },
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    tooltip:
+                                        _speechService.isSpeaking
+                                            ? (_speechService.isPaused
+                                                ? 'Resume'
+                                                : 'Pause')
+                                            : 'Read aloud',
+                                  );
+                                },
+                              ),
+                            // Stop TTS button
+                            if (_isSpeechServiceInitialized)
+                              ListenableBuilder(
+                                listenable: _speechService,
+                                builder: (context, child) {
+                                  return _speechService.isSpeaking
+                                      ? IconButton(
+                                        icon: Icon(
+                                          Icons.stop,
+                                          size: 16,
+                                          color: Colors.grey[600],
+                                        ),
+                                        onPressed: () => _speechService.stop(),
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                        tooltip: 'Stop reading',
+                                      )
+                                      : const SizedBox.shrink();
+                                },
+                              ),
                           ],
                         ),
                     ],
@@ -857,7 +929,8 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                 ),
                 const SizedBox(height: 4),
                 Row(
-                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment:
+                      isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
                   children: [
                     Text(
                       _formatTime(message.timestamp),
@@ -946,10 +1019,10 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
 
   Widget _buildInputArea() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(8.0),
       decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
+        color: Colors.white,
+        border: Border(top: BorderSide(color: Colors.grey[300]!)),
       ),
       child: Row(
         children: [
@@ -989,6 +1062,50 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
             ),
           ),
           const SizedBox(width: 8),
+          // STT button
+          if (_isSpeechServiceInitialized)
+            ListenableBuilder(
+              listenable: _speechService,
+              builder: (context, child) {
+                return IconButton(
+                  icon: Icon(
+                    _speechService.isListening ? Icons.mic : Icons.mic_none,
+                    color:
+                        _speechService.isListening
+                            ? Colors.red
+                            : Theme.of(context).primaryColor,
+                  ),
+                  onPressed:
+                      _speechService.speechEnabled && !_isLoading
+                          ? () {
+                            if (_speechService.isListening) {
+                              _speechService.stopListening();
+                            } else {
+                              _speechService.startListening(
+                                onResult: (result) {
+                                  if (result.isNotEmpty) {
+                                    _questionController.text = result;
+                                    setState(() {});
+                                  }
+                                },
+                              );
+                            }
+                          }
+                          : null,
+                  style: IconButton.styleFrom(
+                    backgroundColor: Theme.of(
+                      context,
+                    ).primaryColor.withOpacity(0.1),
+                  ),
+                  tooltip:
+                      _speechService.isListening
+                          ? 'Stop listening'
+                          : 'Voice input',
+                );
+              },
+            ),
+          const SizedBox(width: 8),
+          // Send button
           ValueListenableBuilder<TextEditingValue>(
             valueListenable: _questionController,
             builder: (context, value, child) {

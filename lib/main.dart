@@ -36,6 +36,7 @@ import 'main_pane.dart';
 import 'models.dart';
 import 'dash_board.dart';
 import 'user_profile.dart';
+import 'services/speech_service.dart';
 
 /// Achievement notification dialog with animations
 class AchievementDialog extends StatefulWidget {
@@ -213,6 +214,9 @@ Future<void> main() async {
   if (kIsWeb) {
     WebViewPlatform.instance = WebWebViewPlatform();
   }
+
+  // Initialize speech service
+  await SpeechService().initialize();
 
   runApp(const FileGeniusApp());
 }
