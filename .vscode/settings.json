@@ -26,5 +26,6 @@
         "syncfusion",
         "Uncategorised",
         "Unser"
-    ]
+    ],
+    "editor.quickSuggestions": false
 }
