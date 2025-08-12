@@ -307,6 +307,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Guard to prevent saving zeroed defaults before remote load completes
   bool _hasLoadedUserData = false;
 
+  // === Learning Analytics (added) ===
+  Map<String, double> _studyTimeBySubject = {}; // subject -> hours
+  Map<String, int> _weeklyPerformance = {}; // weekday (Mon..Sun) -> sessions
+  double _totalStudyTime = 0.0;
+  DateTime? _currentStudyStart;
+  String? _currentStudySubject;
+  Timer? _studyTickTimer;
+  // ====================================
+
   /* life‑cycle */
   @override
   void initState() {
@@ -327,10 +336,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
 
     _startInactivityMonitor();
+    _startStudyTick();
   }
 
   @override
   void dispose() {
+    _endStudySession(flush: true);
+    _studyTickTimer?.cancel();
     _saveUserData();
     _syncDashboardToFirestore();
 
@@ -444,11 +456,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /* User Data Loading, Saving, and Tracking */
   Future<void> _saveUserData({bool isNewUser = false}) async {
     if (_user == null) return;
-    // Prevent overwriting existing remote progress with zeros before load.
     if (!isNewUser && !_hasLoadedUserData) {
       debugPrint('⏭ Skipping _saveUserData: user data not loaded yet.');
       return;
     }
+
+    // Flush any running study session before saving
+    _endStudySession(flush: true);
 
     final userData = {
       'filesUploaded': _filesUploaded,
@@ -467,6 +481,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       'dailyActivity': _dailyActivity,
       'weeklyUploads': _weeklyUploads,
       'monthlyUploads': _monthlyUploads,
+      // --- Added analytics fields ---
+      'studyTimeBySubject': _studyTimeBySubject,
+      'weeklyPerformance': _weeklyPerformance,
+      'totalStudyTime': _totalStudyTime,
+      // --------------------------------
       'lastUpdated': FieldValue.serverTimestamp(),
     };
 
@@ -492,6 +511,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       debugPrint('⏭ Skipping _syncDashboardToFirestore: data not loaded yet.');
       return;
     }
+    _endStudySession(flush: true);
     try {
       await FirebaseFirestore.instance
           .collection('dashboards')
@@ -510,6 +530,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             'dailyActivity': _dailyActivity,
             'unlockedBadges': _unlockedBadges,
             'recentAchievements': _recentAchievements,
+            // --- Added analytics fields ---
+            'studyTimeBySubject': _studyTimeBySubject,
+            'weeklyPerformance': _weeklyPerformance,
+            'totalStudyTime': _totalStudyTime,
+            // --------------------------------
             'lastUpdated': FieldValue.serverTimestamp(),
           }, SetOptions(merge: true));
     } catch (e) {
@@ -1040,6 +1065,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           dashboardKey: _dashboardKey,
         );
       } else if (_previewFile != null) {
+        final subject = _deriveSubject(_previewFile!);
+        _startStudySession(subject);
         content = MainPane(
           key: ValueKey('main_pane_${_previewFile?.id}'),
           selectedFolder: _selectedFolder,
@@ -1048,11 +1075,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           onDropFiles: (fs) => _handleDroppedFiles(fs, _selectedFolder),
           onOpenUrl: _openUrl,
           previewFile: _previewFile,
-          onSelectFile: (file) => setState(() => _previewFile = file),
+          onSelectFile:
+              (file) => setState(() {
+                _previewFile = file;
+                if (file != null) _startStudySession(_deriveSubject(file));
+              }),
           onDeleteFile: _handleDeleteFile,
           onAIInteractionSuccess: onAIInteractionSuccess,
         );
       } else if (_selectedFolder != null) {
+        // Leaving file view -> end session
+        _endStudySession(flush: true);
         content = MainPane(
           selectedFolder: _selectedFolder,
           files: _visibleFiles,
@@ -1060,12 +1093,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           onDropFiles: (fs) => _handleDroppedFiles(fs, _selectedFolder),
           onOpenUrl: _openUrl,
           previewFile: _previewFile,
-          onSelectFile: (file) => setState(() => _previewFile = file),
+          onSelectFile:
+              (file) => setState(() {
+                _previewFile = file;
+                if (file != null) _startStudySession(_deriveSubject(file));
+              }),
           onDeleteFile: _handleDeleteFile,
           onAIInteractionSuccess: onAIInteractionSuccess,
         );
       } else {
-        // Show welcome/upload screen (no folder or file selected)
+        _endStudySession(flush: true);
         content = MainPane(
           selectedFolder: null,
           files: const [],
@@ -1073,7 +1110,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           onDropFiles: (fs) => _handleDroppedFiles(fs, null),
           onOpenUrl: _openUrl,
           previewFile: null,
-          onSelectFile: (file) => setState(() => _previewFile = file),
+          onSelectFile:
+              (file) => setState(() {
+                _previewFile = file;
+                if (file != null) _startStudySession(_deriveSubject(file));
+              }),
           onDeleteFile: _handleDeleteFile,
           onAIInteractionSuccess: onAIInteractionSuccess,
         );
@@ -1720,5 +1761,66 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _dailyActivity[key] = (_dailyActivity[key] ?? 0) + 1;
     });
     _syncDashboardToFirestore(); // <— quickly reflect daily activity blocks
+  }
+
+  // ====== Study Session Tracking ======
+  void _startStudySession(String subject) {
+    // End previous session first
+    _endStudySession(flush: true);
+    _currentStudySubject = subject;
+    _currentStudyStart = DateTime.now();
+
+    // Increment weekly performance session count
+    final weekday = _weekdayKey(DateTime.now());
+    _weeklyPerformance[weekday] = (_weeklyPerformance[weekday] ?? 0) + 1;
+    _syncDashboardToFirestore();
+  }
+
+  void _endStudySession({bool flush = false}) {
+    if (_currentStudyStart == null || _currentStudySubject == null) return;
+    final elapsed =
+        DateTime.now().difference(_currentStudyStart!).inSeconds / 3600.0;
+    if (elapsed > 0) {
+      _studyTimeBySubject[_currentStudySubject!] =
+          (_studyTimeBySubject[_currentStudySubject!] ?? 0) + elapsed;
+      _totalStudyTime = _studyTimeBySubject.values.fold<double>(
+        0.0,
+        (a, b) => a + b,
+      );
+    }
+    _currentStudyStart = null;
+    _currentStudySubject = null;
+    if (flush) {
+      _saveUserData();
+      _syncDashboardToFirestore();
+    }
+  }
+
+  void _startStudyTick() {
+    _studyTickTimer?.cancel();
+    _studyTickTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      // Periodically accumulate partial time so dashboard feels live
+      if (_currentStudyStart != null) {
+        _endStudySession(flush: false);
+        // Restart session (continuous)
+        if (_currentStudySubject != null) {
+          _currentStudyStart = DateTime.now();
+        }
+        _syncDashboardToFirestore();
+      }
+    });
+  }
+
+  String _weekdayKey(DateTime dt) {
+    const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return names[dt.weekday - 1];
+  }
+
+  String _deriveSubject(FileMeta file) {
+    final ext = file.type.toLowerCase();
+    if (ext == 'pdf') return 'Reading';
+    if (ext == 'pptx') return 'Slides';
+    if (ext == 'docx') return 'Docs';
+    return 'Other';
   }
 }
