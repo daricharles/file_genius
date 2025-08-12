@@ -19,8 +19,6 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-// Remove the unused import for intl
-// import 'package:intl/intl.dart';
 import 'firebase_options.dart';
 
 // WebView for web support
@@ -273,7 +271,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final Map<String, List<FileMeta>> _filesByFolder = {};
   final Set<String> _collapsed = {};
 
-  // ADD THIS LINE - Dashboard key for refreshing
+  // Dashboard key for refreshing
   final GlobalKey<DashboardScreenState> _dashboardKey =
       GlobalKey<DashboardScreenState>();
 
@@ -290,8 +288,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   double _uploadProgress = 0.0;
   String _loadingMessage = '';
 
-  // Badge tracking
-
   // Enhanced Analytics for Phase 2
   int _weeklyUploads = 0;
   int _monthlyUploads = 0;
@@ -303,10 +299,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // Last activity tracking
   DateTime? _lastActivityTime;
+  Timer? _inactivityTimer;
 
-  // Timer? _inactivityTimer; // Add this field to your state class:
-
-  // ADD THIS LINE
+  // User profile flag
   bool _showUserProfile = false;
 
   /* life‑cycle */
@@ -317,10 +312,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _user = FirebaseAuth.instance.currentUser;
     _attachFirestoreStreams();
 
-    // FIXED: Load data first, then track login
+    // CRITICAL: Load data FIRST, then do everything else
     _loadUserData().then((_) {
-      _trackLoginDay();
-      _syncDashboardToFirestore(); // Use the correct method name
+      _syncDashboardToFirestore();
     });
 
     _backupTimer = Timer.periodic(
@@ -526,7 +520,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (doc.exists) {
         final data = doc.data()!;
 
-        // CRITICAL FIX: Actually load the data into state variables
+        // CRITICAL FIX: Load data into state variables BEFORE any other operations
         setState(() {
           _filesUploaded = data['filesUploaded'] ?? 0;
           _aiChatInteractions = data['aiChatInteractions'] ?? 0;
@@ -552,9 +546,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           final lastLoginTimestamp = data['lastLoginDate'] as Timestamp?;
           _lastLoginDate = lastLoginTimestamp?.toDate();
         });
+
+        // After loading data, THEN track login day
+        await _trackLoginDay();
       } else {
         // First time user, initialize with default values
         await _saveUserData(isNewUser: true);
+        await _trackLoginDay();
       }
     } catch (e) {
       debugPrint('Error loading user data: $e');
@@ -564,6 +562,67 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() {
           _isLoading = false;
         });
+      }
+    }
+  }
+
+  // Update the _trackLoginDay method to be additive rather than overwriting
+  Future<void> _trackLoginDay() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null || !mounted) return;
+
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+
+      int? difference;
+      if (_lastLoginDate != null) {
+        final last = DateTime(
+          _lastLoginDate!.year,
+          _lastLoginDate!.month,
+          _lastLoginDate!.day,
+        );
+        difference = today.difference(last).inDays;
+      }
+
+      setState(() {
+        if (_lastLoginDate == null) {
+          // First ever login - only add points if not already awarded
+          _loginDays = 1;
+          if (_totalPoints == 0) {
+            _totalPoints += 5; // Only add if starting fresh
+          }
+        } else if (difference == 1) {
+          // Consecutive day - extend streak
+          _loginDays += 1;
+          _totalPoints += 5;
+        } else if (difference != null && difference > 1) {
+          // Streak broken - reset streak but don't reset total points
+          _loginDays = 1;
+          _totalPoints += 5;
+        } else if (difference == 0) {
+          // Same day login - don't add points or change streak
+          return;
+        }
+
+        // Always update lastLoginDate
+        _lastLoginDate = now;
+      });
+
+      _trackDailyActivity();
+      _checkForNewAchievements();
+
+      await _saveUserData();
+      _syncDashboardToFirestore();
+
+      if (_loginDays % 3 == 0) {
+        _showStreakNotification(_loginDays);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     }
   }
@@ -634,63 +693,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     Future.delayed(const Duration(milliseconds: 500), () {
       _dashboardKey.currentState?.refreshDashboard();
     });
-  }
-
-  // Ensure consistent login day tracking
-  Future<void> _trackLoginDay() async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null || !mounted) return; // Add mounted check
-
-      await Future.delayed(const Duration(seconds: 1));
-
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-
-      int? difference;
-      if (_lastLoginDate != null) {
-        final last = DateTime(
-          _lastLoginDate!.year,
-          _lastLoginDate!.month,
-          _lastLoginDate!.day,
-        );
-        difference = today.difference(last).inDays;
-      }
-
-      setState(() {
-        if (_lastLoginDate == null) {
-          // First ever login
-          _loginDays = 1;
-          _totalPoints += 5;
-        } else if (difference == 1) {
-          _loginDays += 1;
-          _totalPoints += 5;
-        } else if (difference != null && difference > 1) {
-          // Streak broken
-          _loginDays = 1;
-          _totalPoints += 5;
-        }
-        // Always update lastLoginDate BEFORE saving so persistence is correct
-        _lastLoginDate = now;
-      });
-
-      _trackDailyActivity();
-      _checkForNewAchievements();
-
-      await _saveUserData(); // now includes updated lastLoginDate
-      _syncDashboardToFirestore();
-
-      if (_loginDays % 3 == 0) {
-        _showStreakNotification(_loginDays);
-      }
-    } catch (e) {
-      if (mounted) {
-        // Add mounted check before showing snackbar
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error: $e')));
-      }
-    }
   }
 
   // Implement periodic backup
@@ -860,8 +862,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _startInactivityMonitor(); // Restart the inactivity monitor
   }
 
-  Timer? _inactivityTimer;
-
   void _startInactivityMonitor() {
     _inactivityTimer?.cancel(); // Cancel previous timer if any
     _inactivityTimer = Timer.periodic(const Duration(minutes: 10), (
@@ -935,7 +935,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _backupAllProgressData();
           setState(() {
             _showDashboard = true;
-            _showUserProfile = false; // Add this line
+            _showUserProfile = false;
             _selectedFolder = null;
             _previewFile = null;
           });
@@ -954,13 +954,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   id == null ? null : _folders.firstWhere((f) => f.id == id);
               _previewFile = null;
               _showDashboard = false;
-              _showUserProfile = false; // Add this line
+              _showUserProfile = false;
             }),
         onSelectAnyFile:
             (file) => setState(() {
               _previewFile = file;
               _showDashboard = false;
-              _showUserProfile = false; // Add this line
+              _showUserProfile = false;
             }),
         onSignOut: () async {
           _clearPreview(); // Clear preview on sign out
@@ -979,7 +979,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         onDeleteFile: _handleDeleteFile,
         onUserProfilePressed:
             () => setState(() {
-              // Add this callback
               _showUserProfile = true;
               _showDashboard = false;
               _selectedFolder = null;
@@ -997,7 +996,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       } else if (_showDashboard) {
         content = DashboardScreen(
-          key: _dashboardKey, // Add this line
+          key: _dashboardKey,
           userId: _user!.uid,
           onBackPressed: () {
             setState(() {
@@ -1024,7 +1023,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               'AI Assistant: Ask questions about your files in the file preview pane',
             );
           },
-          dashboardKey: _dashboardKey, // Pass the key
+          dashboardKey: _dashboardKey,
         );
       } else if (_previewFile != null) {
         content = MainPane(
@@ -1079,7 +1078,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         Expanded(child: content),
                       ],
                     ),
-            floatingActionButton: null, // Removed demo buttons
+            floatingActionButton: null,
           ),
           // Loading overlay
           if (_isLoading || _isUploading)

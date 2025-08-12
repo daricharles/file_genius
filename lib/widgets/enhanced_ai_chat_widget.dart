@@ -1027,38 +1027,48 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       child: Row(
         children: [
           Expanded(
-            child: TextField(
-              controller: _questionController,
-              maxLines: null,
-              minLines: 1,
-              enabled: !_isLoading,
-              decoration: InputDecoration(
-                hintText: 'Ask a question about ${widget.fileName}...',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide(color: Colors.grey[300]!),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  borderSide: BorderSide(color: Theme.of(context).primaryColor),
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 12,
-                ),
-                suffixIcon:
-                    _isLoading
-                        ? Container(
-                          width: 20,
-                          height: 20,
-                          margin: const EdgeInsets.all(12),
-                          child: const CircularProgressIndicator(
-                            strokeWidth: 2,
-                          ),
-                        )
-                        : null,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxHeight: 120, // Set maximum height
+                minHeight: 48, // Set minimum height
               ),
-              onSubmitted: _isLoading ? null : (value) => _sendMessage(),
+              child: TextField(
+                controller: _questionController,
+                maxLines: null,
+                minLines: 1,
+                enabled: !_isLoading,
+                textInputAction: TextInputAction.newline,
+                keyboardType: TextInputType.multiline,
+                decoration: InputDecoration(
+                  hintText: 'Ask a question about ${widget.fileName}...',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide(color: Colors.grey[300]!),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide(
+                      color: Theme.of(context).primaryColor,
+                    ),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  suffixIcon:
+                      _isLoading
+                          ? Container(
+                            width: 20,
+                            height: 20,
+                            margin: const EdgeInsets.all(12),
+                            child: const CircularProgressIndicator(
+                              strokeWidth: 2,
+                            ),
+                          )
+                          : null,
+                ),
+                onSubmitted: _isLoading ? null : (value) => _sendMessage(),
+              ),
             ),
           ),
           const SizedBox(width: 8),
@@ -1093,40 +1103,28 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                           }
                           : null,
                   style: IconButton.styleFrom(
-                    backgroundColor: Theme.of(
-                      context,
-                    ).primaryColor.withOpacity(0.1),
+                    backgroundColor:
+                        _speechService.isListening
+                            ? Colors.red.withOpacity(0.1)
+                            : Theme.of(context).primaryColor.withOpacity(0.1),
                   ),
-                  tooltip:
-                      _speechService.isListening
-                          ? 'Stop listening'
-                          : 'Voice input',
                 );
               },
             ),
           const SizedBox(width: 8),
           // Send button
-          ValueListenableBuilder<TextEditingValue>(
-            valueListenable: _questionController,
-            builder: (context, value, child) {
-              final hasText = value.text.trim().isNotEmpty;
-              return IconButton(
-                onPressed: _isLoading || !hasText ? null : () => _sendMessage(),
-                icon: Icon(
-                  Icons.send,
-                  color:
-                      _isLoading || !hasText
-                          ? Colors.grey
-                          : Theme.of(context).primaryColor,
-                ),
-                style: IconButton.styleFrom(
-                  backgroundColor:
-                      _isLoading || !hasText
-                          ? Colors.grey[200]
-                          : Theme.of(context).primaryColor.withOpacity(0.1),
-                ),
-              );
-            },
+          IconButton(
+            onPressed: _isLoading ? null : () => _sendMessage(),
+            icon: Icon(
+              Icons.send,
+              color: _isLoading ? Colors.grey : Theme.of(context).primaryColor,
+            ),
+            style: IconButton.styleFrom(
+              backgroundColor:
+                  _isLoading
+                      ? Colors.grey.withOpacity(0.1)
+                      : Theme.of(context).primaryColor.withOpacity(0.1),
+            ),
           ),
         ],
       ),

@@ -464,6 +464,7 @@ class _AIChatWidgetState extends State<AIChatWidget> {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(
                     maxHeight: 120, // Maximum height for the text input
+                    minHeight: 48, // Minimum height
                   ),
                   child: TextField(
                     controller: _questionController,
@@ -480,6 +481,7 @@ class _AIChatWidgetState extends State<AIChatWidget> {
                     maxLines: null,
                     minLines: 1,
                     textInputAction: TextInputAction.send,
+                    keyboardType: TextInputType.multiline,
                     onSubmitted: (_) => _sendMessage(),
                   ),
                 ),
@@ -489,17 +491,28 @@ class _AIChatWidgetState extends State<AIChatWidget> {
                 message: 'Send',
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
+                  width: 48,
+                  height: 48,
                   decoration: BoxDecoration(
                     color:
                         _isLoading
                             ? Colors.grey
                             : Theme.of(context).primaryColor,
-                    shape: BoxShape.circle,
+                    borderRadius: BorderRadius.circular(24),
                   ),
                   child: IconButton(
                     onPressed: _isLoading ? null : _sendMessage,
-                    icon: const Icon(Icons.send),
-                    color: Colors.white,
+                    icon:
+                        _isLoading
+                            ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                            : const Icon(Icons.send, color: Colors.white),
                   ),
                 ),
               ),

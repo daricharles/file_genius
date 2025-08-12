@@ -188,27 +188,26 @@ class DashboardScreenState extends State<DashboardScreen> {
     if (!mounted) return;
 
     try {
-      // Try both collections to get the most recent data
-      final dashboardDoc =
-          await _firestore.collection('dashboards').doc(widget.userId).get();
+      // Always prefer user collection for the source of truth
       final userDoc =
           await _firestore.collection('users').doc(widget.userId).get();
+      final dashboardDoc =
+          await _firestore.collection('dashboards').doc(widget.userId).get();
 
       if (!mounted) return;
 
       Map<String, dynamic>? data;
 
-      // Prefer dashboard data if it exists and is recent, otherwise use user data
-      if (dashboardDoc.exists) {
-        data = dashboardDoc.data();
-      } else if (userDoc.exists) {
+      // Use user data as primary source, dashboard as backup
+      if (userDoc.exists) {
         data = userDoc.data();
+      } else if (dashboardDoc.exists) {
+        data = dashboardDoc.data();
       }
 
       if (data != null && mounted) {
-        // Add null check here
         setState(() {
-          _applyDashboardData(data!); // Use ! to assert non-null
+          _applyDashboardData(data!);
         });
       } else {
         // Create initial document
