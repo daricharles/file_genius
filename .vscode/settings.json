@@ -4,6 +4,7 @@
         "Buffett",
         "buildlog",
         "cand",
+        "Cooldown",
         "Cupertino",
         "dotenv",
         "filegenius",
@@ -27,5 +28,9 @@
         "Uncategorised",
         "Unser"
     ],
-    "editor.quickSuggestions": false
+    "editor.quickSuggestions": {
+        "comments": "off",
+        "strings": "off",
+        "other": "off"
+    }
 }
