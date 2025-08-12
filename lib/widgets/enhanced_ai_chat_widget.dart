@@ -1034,8 +1034,8 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
               ),
               child: TextField(
                 controller: _questionController,
-                maxLines: null,
                 minLines: 1,
+                maxLines: 4, // cap height; internal scroll after 4 lines
                 enabled: !_isLoading,
                 textInputAction: TextInputAction.newline,
                 keyboardType: TextInputType.multiline,

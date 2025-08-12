@@ -304,6 +304,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // User profile flag
   bool _showUserProfile = false;
 
+  // Guard to prevent saving zeroed defaults before remote load completes
+  bool _hasLoadedUserData = false;
+
   /* life‑cycle */
   @override
   void initState() {
@@ -312,9 +315,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _user = FirebaseAuth.instance.currentUser;
     _attachFirestoreStreams();
 
-    // CRITICAL: Load data FIRST, then do everything else
     _loadUserData().then((_) {
-      _syncDashboardToFirestore();
+      if (_hasLoadedUserData) {
+        _syncDashboardToFirestore();
+      }
     });
 
     _backupTimer = Timer.periodic(
@@ -440,6 +444,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /* User Data Loading, Saving, and Tracking */
   Future<void> _saveUserData({bool isNewUser = false}) async {
     if (_user == null) return;
+    // Prevent overwriting existing remote progress with zeros before load.
+    if (!isNewUser && !_hasLoadedUserData) {
+      debugPrint('⏭ Skipping _saveUserData: user data not loaded yet.');
+      return;
+    }
 
     final userData = {
       'filesUploaded': _filesUploaded,
@@ -479,6 +488,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Add this helper to keep dashboards/<uid> in sync with the counters
   Future<void> _syncDashboardToFirestore() async {
     if (_user == null) return;
+    if (!_hasLoadedUserData) {
+      debugPrint('⏭ Skipping _syncDashboardToFirestore: data not loaded yet.');
+      return;
+    }
     try {
       await FirebaseFirestore.instance
           .collection('dashboards')
@@ -522,41 +535,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
         // CRITICAL FIX: Load data into state variables BEFORE any other operations
         setState(() {
-          _filesUploaded = data['filesUploaded'] ?? 0;
-          _aiChatInteractions = data['aiChatInteractions'] ?? 0;
-          _questionsAnswered = data['questionsAnswered'] ?? 0;
-          _correctAnswers = data['correctAnswers'] ?? 0;
-          _loginDays = data['loginDays'] ?? 0;
-          _totalPoints = data['totalPoints'] ?? 0;
-          _weeklyUploads = data['weeklyUploads'] ?? 0;
-          _monthlyUploads = data['monthlyUploads'] ?? 0;
-
-          // Load complex data structures
+          _filesUploaded = data['filesUploaded'] ?? _filesUploaded;
+          _aiChatInteractions =
+              data['aiChatInteractions'] ?? _aiChatInteractions;
+          _questionsAnswered = data['questionsAnswered'] ?? _questionsAnswered;
+          _correctAnswers = data['correctAnswers'] ?? _correctAnswers;
+          _loginDays = data['loginDays'] ?? _loginDays;
+          _totalPoints = data['totalPoints'] ?? _totalPoints;
+          _weeklyUploads = data['weeklyUploads'] ?? _weeklyUploads;
+          _monthlyUploads = data['monthlyUploads'] ?? _monthlyUploads;
           _unlockedBadges = List<String>.from(data['unlockedBadges'] ?? []);
           _recentAchievements = List<String>.from(
             data['recentAchievements'] ?? [],
           );
-          _fileTypeStats = Map<String, int>.from(data['fileTypeStats'] ?? {});
-          _dailyActivity = Map<String, int>.from(data['dailyActivity'] ?? {});
-
-          // Load user name
+          _fileTypeStats = Map<String, int>.from(
+            data['fileTypeStats'] ?? _fileTypeStats,
+          );
+          _dailyActivity = Map<String, int>.from(
+            data['dailyActivity'] ?? _dailyActivity,
+          );
           _userName = data['displayName'] ?? data['userName'] ?? 'User';
-
-          // Handle lastLoginDate properly
           final lastLoginTimestamp = data['lastLoginDate'] as Timestamp?;
           _lastLoginDate = lastLoginTimestamp?.toDate();
+          _hasLoadedUserData = true;
         });
 
         // After loading data, THEN track login day
         await _trackLoginDay();
       } else {
-        // First time user, initialize with default values
+        // First-time user
         await _saveUserData(isNewUser: true);
+        _hasLoadedUserData = true;
         await _trackLoginDay();
       }
     } catch (e) {
       debugPrint('Error loading user data: $e');
-      _snack('Could not load user profile.', err: true);
+      // Do NOT write zeros back if load failed.
     } finally {
       if (mounted) {
         setState(() {

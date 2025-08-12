@@ -478,8 +478,8 @@ class _AIChatWidgetState extends State<AIChatWidget> {
                         vertical: 12,
                       ),
                     ),
-                    maxLines: null,
                     minLines: 1,
+                    maxLines: 4, // capped for internal scroll
                     textInputAction: TextInputAction.send,
                     keyboardType: TextInputType.multiline,
                     onSubmitted: (_) => _sendMessage(),
