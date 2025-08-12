@@ -69,30 +69,36 @@ class ConversationManager {
     required String fileName,
     required String fileType,
     required String filePath,
+    String? fileId, // ADDED
     Map<String, dynamic>? fileMetadata,
   }) async {
-    // Look for existing session
-    final existingSession = _sessions.firstWhere(
-      (session) => session.filePath == filePath && !session.isArchived,
-      orElse:
-          () => _createNewSession(
-            fileName: fileName,
-            fileType: fileType,
-            filePath: filePath,
-            fileMetadata: fileMetadata,
-          ),
-    );
-
-    // If we found an existing session, return it
-    if (_sessions.contains(existingSession)) {
-      return existingSession;
+    // Build session key logic (uses fileId if available)
+    keyMatcher(ChatSession s) {
+      if (fileId != null && s.fileId == fileId && !s.isArchived) return true;
+      return s.filePath == filePath && !s.isArchived;
     }
 
-    // If it's a new session, add it to the list and save
-    _sessions.insert(0, existingSession);
-    // Save individual session to Firebase
-    await _firebaseService.saveChatSession(existingSession);
-    return existingSession;
+    ChatSession? existing;
+    try {
+      existing = _sessions.firstWhere(keyMatcher);
+    } catch (_) {
+      existing = null;
+    }
+
+    if (existing != null) {
+      return existing;
+    }
+
+    final newSession = _createNewSession(
+      fileName: fileName,
+      fileType: fileType,
+      filePath: filePath,
+      fileId: fileId, // ADDED
+      fileMetadata: fileMetadata,
+    );
+    _sessions.insert(0, newSession);
+    await _firebaseService.saveChatSession(newSession);
+    return newSession;
   }
 
   /// Create a new chat session
@@ -100,6 +106,7 @@ class ConversationManager {
     required String fileName,
     required String fileType,
     required String filePath,
+    String? fileId, // ADDED
     Map<String, dynamic>? fileMetadata,
   }) {
     final now = DateTime.now();
@@ -110,6 +117,7 @@ class ConversationManager {
       fileName: fileName,
       fileType: fileType,
       filePath: filePath,
+      fileId: fileId, // ADDED
       createdAt: now,
       lastUpdatedAt: now,
       messages: [_createWelcomeMessage(fileName, sessionId)],

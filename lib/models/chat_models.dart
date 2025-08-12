@@ -83,11 +83,11 @@ class ChatSession {
   final String fileName;
   final String fileType;
   final String filePath;
+  final String? fileId; // ADDED
   final DateTime createdAt;
   final DateTime lastUpdatedAt;
   final List<EnhancedChatMessage> messages;
   final Map<String, dynamic> fileMetadata;
-  final List<String> tags;
   final bool isArchived;
 
   ChatSession({
@@ -95,27 +95,38 @@ class ChatSession {
     required this.fileName,
     required this.fileType,
     required this.filePath,
+    this.fileId, // ADDED
     required this.createdAt,
     required this.lastUpdatedAt,
     required this.messages,
     this.fileMetadata = const {},
-    this.tags = const [],
     this.isArchived = false,
   });
 
-  Map<String, dynamic> toJson() {
-    return {
-      'id': id,
-      'fileName': fileName,
-      'fileType': fileType,
-      'filePath': filePath,
-      'createdAt': createdAt.toIso8601String(),
-      'lastUpdatedAt': lastUpdatedAt.toIso8601String(),
-      'messages': messages.map((m) => m.toJson()).toList(),
-      'fileMetadata': fileMetadata,
-      'tags': tags,
-      'isArchived': isArchived,
-    };
+  ChatSession copyWith({
+    String? id,
+    String? fileName,
+    String? fileType,
+    String? filePath,
+    String? fileId, // ADDED
+    DateTime? createdAt,
+    DateTime? lastUpdatedAt,
+    List<EnhancedChatMessage>? messages,
+    Map<String, dynamic>? fileMetadata,
+    bool? isArchived,
+  }) {
+    return ChatSession(
+      id: id ?? this.id,
+      fileName: fileName ?? this.fileName,
+      fileType: fileType ?? this.fileType,
+      filePath: filePath ?? this.filePath,
+      fileId: fileId ?? this.fileId, // ADDED
+      createdAt: createdAt ?? this.createdAt,
+      lastUpdatedAt: lastUpdatedAt ?? this.lastUpdatedAt,
+      messages: messages ?? this.messages,
+      fileMetadata: fileMetadata ?? this.fileMetadata,
+      isArchived: isArchived ?? this.isArchived,
+    );
   }
 
   factory ChatSession.fromJson(Map<String, dynamic> json) {
@@ -124,42 +135,32 @@ class ChatSession {
       fileName: json['fileName'],
       fileType: json['fileType'],
       filePath: json['filePath'],
+      fileId: json['fileId'], // ADDED (nullable)
       createdAt: DateTime.parse(json['createdAt']),
       lastUpdatedAt: DateTime.parse(json['lastUpdatedAt']),
       messages:
-          (json['messages'] as List)
+          (json['messages'] as List<dynamic>)
               .map((m) => EnhancedChatMessage.fromJson(m))
               .toList(),
-      fileMetadata: json['fileMetadata'] ?? {},
-      tags: List<String>.from(json['tags'] ?? []),
+      fileMetadata:
+          (json['fileMetadata'] as Map?)?.cast<String, dynamic>() ?? {},
       isArchived: json['isArchived'] ?? false,
     );
   }
 
-  ChatSession copyWith({
-    String? id,
-    String? fileName,
-    String? fileType,
-    String? filePath,
-    DateTime? createdAt,
-    DateTime? lastUpdatedAt,
-    List<EnhancedChatMessage>? messages,
-    Map<String, dynamic>? fileMetadata,
-    List<String>? tags,
-    bool? isArchived,
-  }) {
-    return ChatSession(
-      id: id ?? this.id,
-      fileName: fileName ?? this.fileName,
-      fileType: fileType ?? this.fileType,
-      filePath: filePath ?? this.filePath,
-      createdAt: createdAt ?? this.createdAt,
-      lastUpdatedAt: lastUpdatedAt ?? this.lastUpdatedAt,
-      messages: messages ?? this.messages,
-      fileMetadata: fileMetadata ?? this.fileMetadata,
-      tags: tags ?? this.tags,
-      isArchived: isArchived ?? this.isArchived,
-    );
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'fileName': fileName,
+      'fileType': fileType,
+      'filePath': filePath,
+      'fileId': fileId, // ADDED
+      'createdAt': createdAt.toIso8601String(),
+      'lastUpdatedAt': lastUpdatedAt.toIso8601String(),
+      'messages': messages.map((m) => m.toJson()).toList(),
+      'fileMetadata': fileMetadata,
+      'isArchived': isArchived,
+    };
   }
 
   /// Get the last message in the session

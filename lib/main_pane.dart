@@ -25,7 +25,7 @@ import 'file_viewer.dart';
 import 'services/file_content_extractor.dart';
 import 'widgets/enhanced_ai_chat_widget.dart';
 
-class MainPane extends StatelessWidget {
+class MainPane extends StatefulWidget {
   const MainPane({
     super.key,
     required this.selectedFolder,
@@ -44,131 +44,262 @@ class MainPane extends StatelessWidget {
   final VoidCallback onPickFiles;
   final void Function(List<PlatformFile>) onDropFiles;
   final void Function(String url) onOpenUrl;
-  final FileMeta? previewFile; // Add preview file parameter
-  final void Function(FileMeta? file)?
-  onSelectFile; // Add file selection callback
+  final FileMeta? previewFile;
+  final void Function(FileMeta? file)? onSelectFile;
   final void Function(FileMeta file)? onDeleteFile;
-  final VoidCallback? onAIInteractionSuccess; // Add AI interaction callback
+  final VoidCallback? onAIInteractionSuccess;
+
+  @override
+  State<MainPane> createState() => _MainPaneState();
+}
+
+class _MainPaneState extends State<MainPane> {
+  final Map<String, String> _fileContentCache = {};
+  Future<String>? _fileContentFuture;
+  String? _fileContentFutureKey; // cacheKey the future corresponds to
+
+  @override
+  void initState() {
+    super.initState();
+    _prepareFileContentFuture(); // initialize if previewFile already set
+  }
+
+  @override
+  void didUpdateWidget(MainPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // Only prepare a new future when the previewed file actually changes
+    if (widget.previewFile?.id != oldWidget.previewFile?.id) {
+      _prepareFileContentFuture();
+    }
+
+    // If previewFile cleared
+    if (widget.previewFile == null && oldWidget.previewFile != null) {
+      _fileContentFuture = null;
+      _fileContentFutureKey = null;
+    }
+  }
+
+  void _prepareFileContentFuture() {
+    final file = widget.previewFile;
+    if (file == null) {
+      _fileContentFuture = null;
+      _fileContentFutureKey = null;
+      return;
+    }
+    final cacheKey = '${file.id}_${file.name}';
+    // Reuse if we already have a future for this cacheKey
+    if (_fileContentFuture != null && _fileContentFutureKey == cacheKey) {
+      return;
+    }
+
+    if (_fileContentCache.containsKey(cacheKey)) {
+      // Immediate future with cached value
+      _fileContentFuture = Future.value(_fileContentCache[cacheKey]!);
+      _fileContentFutureKey = cacheKey;
+    } else {
+      _fileContentFuture = FileContentExtractor.extractContent(
+        fileUrl: file.url,
+        fileType: file.type,
+        fileName: file.name,
+      ).then((content) {
+        _fileContentCache[cacheKey] = content;
+        return content;
+      });
+      _fileContentFutureKey = cacheKey;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     // If a file is selected for preview, show split view
-    if (previewFile != null) {
-      return FutureBuilder<String>(
-        future: FileContentExtractor.extractContent(
-          fileUrl: previewFile!.url,
-          fileType: previewFile!.type,
-          fileName: previewFile!.name,
-        ),
-        builder: (context, snapshot) {
-          final supported = FileContentExtractor.supportsAIAnalysis(
-            previewFile!.type,
-          );
-          return Row(
-            children: [
-              // Left: File preview pane
-              Expanded(
-                flex: 1,
-                child: Column(
-                  children: [
-                    // Header with file name, info, and actions
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          // File icon
-                          Icon(
-                            _iconForFileType(previewFile!.type),
-                            color: Colors.blue,
-                          ),
-                          const SizedBox(width: 8),
-                          // File name and info
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  previewFile!.name,
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                Text(
-                                  '${_formatFileSize(previewFile!.size)} • ${previewFile!.type}',
-                                  style: TextStyle(
-                                    color: Colors.grey[600],
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
+    if (widget.previewFile != null) {
+      final supported = FileContentExtractor.supportsAIAnalysis(
+        widget.previewFile!.type,
+      );
+
+      return Row(
+        children: [
+          // Left: File preview pane
+          Expanded(
+            flex: 1,
+            child: Column(
+              children: [
+                // Header with file name, info, and actions
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      // File icon
+                      Icon(
+                        _iconForFileType(widget.previewFile!.type),
+                        color: Colors.blue,
+                      ),
+                      const SizedBox(width: 8),
+                      // File name and info
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.previewFile!.name,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
+                            Text(
+                              '${_formatFileSize(widget.previewFile!.size)} • ${widget.previewFile!.type}',
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Download icon
+                      IconButton(
+                        icon: const Icon(Icons.download_rounded),
+                        tooltip: 'Download file',
+                        onPressed:
+                            () => widget.onOpenUrl(widget.previewFile!.url),
+                      ),
+                      // Delete icon
+                      IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        tooltip: 'Delete file',
+                        onPressed:
+                            () =>
+                                widget.onDeleteFile?.call(widget.previewFile!),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                // File viewer
+                Expanded(
+                  child: FileViewer(
+                    key: ValueKey('file_viewer_${widget.previewFile!.id}'),
+                    fileUrl: widget.previewFile!.url,
+                    fileType: widget.previewFile!.type.toLowerCase(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Split divider
+          Container(
+            width: 1,
+            color: Colors.grey[300],
+            margin: const EdgeInsets.symmetric(vertical: 12),
+          ),
+          // Right pane: AI chat
+          Expanded(
+            flex: 1,
+            child:
+                !supported
+                    ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.chat_bubble_outline,
+                            size: 64,
+                            color: Colors.grey[400],
                           ),
-                          // Download icon
-                          IconButton(
-                            icon: const Icon(Icons.download_rounded),
-                            tooltip: 'Download file',
-                            onPressed: () => onOpenUrl(previewFile!.url),
+                          const SizedBox(height: 16),
+                          Text(
+                            'AI chat is not supported for this file type.',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 16,
+                            ),
+                            textAlign: TextAlign.center,
                           ),
-                          // Delete icon
-                          IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            tooltip: 'Delete file',
-                            onPressed: () => onDeleteFile?.call(previewFile!),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Supported formats: PDF, DOC, TXT, and more.',
+                            style: TextStyle(
+                              color: Colors.grey[500],
+                              fontSize: 14,
+                            ),
+                            textAlign: TextAlign.center,
                           ),
                         ],
                       ),
-                    ),
-                    const Divider(height: 1),
-                    // File viewer
-                    Expanded(
-                      child: FileViewer(
-                        key: ValueKey(previewFile!.id),
-                        fileUrl: previewFile!.url,
-                        fileType: previewFile!.type.toLowerCase(),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Split divider
-              Container(
-                width: 1,
-                color: Colors.grey[300],
-                margin: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              // Right pane: AI chat
-              Expanded(
-                flex: 1,
-                child:
-                    !supported
-                        ? Center(
-                          child: Text(
-                            'AI chat is not supported for this file type.',
-                            style: TextStyle(color: Colors.grey[600]),
+                    )
+                    : FutureBuilder<String>(
+                      // CHANGED: use the memoized future
+                      future: _fileContentFuture,
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
+                          return const Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                CircularProgressIndicator(),
+                                SizedBox(height: 16),
+                                Text('Loading file content...'),
+                              ],
+                            ),
+                          );
+                        }
+
+                        if (snapshot.hasError) {
+                          return Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.error_outline,
+                                  size: 64,
+                                  color: Colors.red[400],
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Failed to load file content',
+                                  style: TextStyle(
+                                    color: Colors.red[600],
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  snapshot.error.toString(),
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 14,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+
+                        // Use a stable key that includes file ID to prevent recreation
+                        return EnhancedAIChatWidget(
+                          key: ValueKey(
+                            'enhanced_ai_chat_${widget.previewFile!.id}',
                           ),
-                        )
-                        : (snapshot.connectionState == ConnectionState.waiting
-                            ? const Center(child: CircularProgressIndicator())
-                            : EnhancedAIChatWidget(
-                              key: ValueKey('ai_chat_${previewFile!.id}'),
-                              fileName: previewFile!.name,
-                              fileType: previewFile!.type,
-                              fileContent: snapshot.data ?? '',
-                              filePath:
-                                  previewFile!
-                                      .url, // Using URL as file path for now
-                              onInteractionSuccess: onAIInteractionSuccess,
-                            )),
-              ),
-            ],
-          );
-        },
+                          fileName: widget.previewFile!.name,
+                          fileType: widget.previewFile!.type,
+                          fileContent: snapshot.data ?? '',
+                          filePath: widget.previewFile!.url,
+                          fileId: widget.previewFile!.id, // NEW
+                          onInteractionSuccess: widget.onAIInteractionSuccess,
+                        );
+                      },
+                    ),
+          ),
+        ],
       );
     }
 
     // ─── Nothing selected: big welcome + upload CTA ───
-    if (selectedFolder == null) {
+    if (widget.selectedFolder == null) {
       return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -187,8 +318,8 @@ class MainPane extends StatelessWidget {
             const SizedBox(height: 24),
             DragDropZone(
               label: 'Drag & drop files here\nor click to upload',
-              onFilesPicked: onPickFiles,
-              onFilesDropped: onDropFiles,
+              onFilesPicked: widget.onPickFiles,
+              onFilesDropped: widget.onDropFiles,
             ),
           ],
         ),
@@ -202,24 +333,23 @@ class MainPane extends StatelessWidget {
         Expanded(
           flex: 1,
           child:
-              files.isEmpty
+              widget.files.isEmpty
                   ? Padding(
                     padding: const EdgeInsets.all(16.0),
                     child: DragDropZone(
                       label:
-                          'Drop files here to upload to "${selectedFolder!.name}"',
-                      onFilesPicked: onPickFiles,
-                      onFilesDropped: onDropFiles,
+                          'Drop files here to upload to "${widget.selectedFolder!.name}"',
+                      onFilesPicked: widget.onPickFiles,
+                      onFilesDropped: widget.onDropFiles,
                     ),
                   )
                   : ListView.separated(
                     padding: const EdgeInsets.all(16),
-                    itemCount: files.length,
-                    // ignore: unnecessary_underscores
-                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemCount: widget.files.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) {
-                      final file = files[index];
-                      final isSelected = file == previewFile;
+                      final file = widget.files[index];
+                      final isSelected = file == widget.previewFile;
                       return MouseRegion(
                         cursor: SystemMouseCursors.click,
                         child: AnimatedContainer(
@@ -255,7 +385,7 @@ class MainPane extends StatelessWidget {
                                   message: 'Open in new tab',
                                   child: IconButton(
                                     icon: const Icon(Icons.open_in_new),
-                                    onPressed: () => onOpenUrl(file.url),
+                                    onPressed: () => widget.onOpenUrl(file.url),
                                   ),
                                 ),
                                 Tooltip(
@@ -265,12 +395,13 @@ class MainPane extends StatelessWidget {
                                       Icons.delete,
                                       color: Colors.red,
                                     ),
-                                    onPressed: () => onDeleteFile?.call(file),
+                                    onPressed:
+                                        () => widget.onDeleteFile?.call(file),
                                   ),
                                 ),
                               ],
                             ),
-                            onTap: () => onSelectFile?.call(file),
+                            onTap: () => widget.onSelectFile?.call(file),
                             selected: isSelected,
                             hoverColor: Colors.blue.withOpacity(0.04),
                             shape: RoundedRectangleBorder(
@@ -292,9 +423,26 @@ class MainPane extends StatelessWidget {
         Expanded(
           flex: 1,
           child: Center(
-            child: Text(
-              'Select a file to start chatting.',
-              style: TextStyle(color: Colors.grey[600], fontSize: 16),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.chat_bubble_outline,
+                  size: 64,
+                  color: Colors.grey[400],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Select a file to start chatting with AI.',
+                  style: TextStyle(color: Colors.grey[600], fontSize: 16),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'AI can help analyze your documents and answer questions.',
+                  style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ),
           ),
         ),

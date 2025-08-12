@@ -58,7 +58,7 @@ dependencies:
   path_provider: ^2.1.2
   flutter_dotenv: ^5.1.0
   fl_chart: ^0.66.2  # For advanced charts and analytics
-  uuid: ^4.2.2  # For generating unique IDs
+  uuid: ^4.1.0  # For generating unique IDs
   shared_preferences: ^2.2.2  # For storing chat sessions
   flutter_local_notifications: ^17.1.2
   provider: ^6.0.0

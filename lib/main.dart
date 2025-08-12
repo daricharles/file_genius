@@ -1041,6 +1041,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
       } else if (_previewFile != null) {
         content = MainPane(
+          key: ValueKey('main_pane_${_previewFile?.id}'),
           selectedFolder: _selectedFolder,
           files: _visibleFiles,
           onPickFiles: _pickFiles,

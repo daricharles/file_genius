@@ -4,10 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:uuid/uuid.dart';
+import 'package:intl/intl.dart';
+
 import '../services/ai_service.dart';
 import '../services/conversation_manager.dart';
 import '../models/chat_models.dart';
-import 'package:intl/intl.dart';
 import '../services/speech_service.dart';
 
 class EnhancedAIChatWidget extends StatefulWidget {
@@ -15,7 +16,8 @@ class EnhancedAIChatWidget extends StatefulWidget {
   final String fileType;
   final String fileContent;
   final String filePath;
-  final Map<String, dynamic>? fileMetadata;
+  final String? fileId; // added earlier
+  final Map<String, dynamic>? fileMetadata; // ADDED to satisfy uses
   final VoidCallback? onInteractionSuccess;
 
   const EnhancedAIChatWidget({
@@ -24,6 +26,7 @@ class EnhancedAIChatWidget extends StatefulWidget {
     required this.fileType,
     required this.fileContent,
     required this.filePath,
+    this.fileId,
     this.fileMetadata,
     this.onInteractionSuccess,
   });
@@ -33,7 +36,7 @@ class EnhancedAIChatWidget extends StatefulWidget {
 }
 
 class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
-    with TickerProviderStateMixin {
+    with SingleTickerProviderStateMixin {
   final TextEditingController _questionController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final AIService _aiService = AIService();
@@ -47,12 +50,13 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   bool _aiTyping = false;
   bool _isSpeechServiceInitialized = false;
 
-  // UI State
   String? _selectedRole;
   String? _selectedDocType;
   String? _selectedFormat;
 
-  // Animation controllers
+  DateTime? _lastSendAt;
+  String? _lastSendText;
+
   late AnimationController _typingAnimationController;
   late Animation<double> _typingAnimation;
 
@@ -91,11 +95,9 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       duration: const Duration(milliseconds: 1500),
       vsync: this,
     );
-    _typingAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _typingAnimationController,
-        curve: Curves.easeInOut,
-      ),
+    _typingAnimation = CurvedAnimation(
+      parent: _typingAnimationController,
+      curve: Curves.easeInOut,
     );
   }
 
@@ -105,55 +107,39 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
 
   Future<void> _initializeSpeechService() async {
     await _speechService.initialize();
-    setState(() {
-      _isSpeechServiceInitialized = true;
-    });
+    if (mounted) {
+      setState(() => _isSpeechServiceInitialized = true);
+    }
   }
 
   @override
-  void didUpdateWidget(EnhancedAIChatWidget oldWidget) {
+  void didUpdateWidget(covariant EnhancedAIChatWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Only reinitialize if the actual file has changed, not just parent state
-    if (widget.filePath != oldWidget.filePath ||
+    if (widget.fileId != oldWidget.fileId ||
+        widget.filePath != oldWidget.filePath ||
         widget.fileName != oldWidget.fileName) {
-      setState(() {
-        _isInitializing = true;
-      });
+      setState(() => _isInitializing = true);
       _loadChatSession();
     }
-    // Ignore other property changes that don't affect the chat session
   }
 
   Future<void> _loadChatSession() async {
     try {
       await _conversationManager.initialize();
-
       _currentSession = await _conversationManager.getOrCreateSession(
         fileName: widget.fileName,
         fileType: widget.fileType,
         filePath: widget.filePath,
         fileMetadata: widget.fileMetadata,
+        fileId: widget.fileId, // add if method signature allows
       );
-
       if (!mounted) return;
-
-      // Set state to false to trigger a rebuild with the new chat session.
-      setState(() {
-        _isInitializing = false;
-      });
-
-      // After the UI has been rebuilt with the new messages, scroll to the bottom.
+      setState(() => _isInitializing = false);
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          _scrollToBottom(isInitialScroll: true);
-        }
+        if (mounted) _scrollToBottom(isInitialScroll: true);
       });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isInitializing = false;
-        });
-      }
+      if (mounted) setState(() => _isInitializing = false);
       debugPrint('Failed to initialize chat: $e');
     }
   }
@@ -170,16 +156,23 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     final question = prompt ?? _questionController.text.trim();
     if (question.isEmpty || _currentSession == null) return;
 
-    final messageId = _uuid.v4();
+    final now = DateTime.now();
+    if (_lastSendText == question &&
+        _lastSendAt != null &&
+        now.difference(_lastSendAt!) < const Duration(seconds: 2)) {
+      return; // suppress rapid duplicate
+    }
+    _lastSendText = question;
+    _lastSendAt = now;
+
     final userMessage = EnhancedChatMessage(
-      id: messageId,
+      id: _uuid.v4(),
       text: question,
       isUser: true,
       timestamp: DateTime.now(),
       messageType: messageType ?? 'question',
     );
 
-    // Add user message to UI immediately and update loading state
     setState(() {
       _currentSession!.messages.add(userMessage);
       _isLoading = true;
@@ -188,20 +181,14 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
 
     _typingAnimationController.repeat();
     _questionController.clear();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
 
-    // Scroll to bottom after the user message is added
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToBottom();
-    });
-
-    // Add user message to session in the background
     await _conversationManager.addMessage(
       sessionId: _currentSession!.id,
       message: userMessage,
     );
 
     try {
-      // Get conversation context for better AI responses
       _conversationManager.getConversationContext(_currentSession!.id);
 
       final response = await _aiService.askQuestion(
@@ -217,57 +204,55 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       _typingAnimationController.stop();
 
       if (response.success) {
-        final aiResponseId = _uuid.v4();
+        final answer = (response.data?['answer'] as String?)?.trim();
+        if (answer == null || answer.isEmpty) {
+          await _showErrorMessage('Empty response from AI');
+          return;
+        }
+
         final aiMessage = EnhancedChatMessage(
-          id: aiResponseId,
-          text: response.data!['answer'],
+          id: _uuid.v4(),
+          text: answer,
           isUser: false,
           timestamp: DateTime.now(),
           messageType: 'response',
           metadata: {
-            'model': 'gemini-1.5-flash-latest',
+            'model': response.data?['model'] ?? 'gemini-1.5-flash-latest',
             'prompt_tokens': response.data?['prompt_tokens'],
             'completion_tokens': response.data?['completion_tokens'],
           },
         );
 
-        // Add AI response to UI and update loading state
         setState(() {
           _currentSession!.messages.add(aiMessage);
           _isLoading = false;
           _aiTyping = false;
         });
 
-        // Add AI message to session in the background
         await _conversationManager.addMessage(
           sessionId: _currentSession!.id,
           message: aiMessage,
         );
 
-        // Call success callback
         widget.onInteractionSuccess?.call();
-
-        // Scroll to bottom after AI response is added
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _scrollToBottom();
-        });
+        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
       } else {
-        // Handle error state
         await _showErrorMessage(response.message);
       }
     } catch (e) {
       _typingAnimationController.stop();
-      // Handle error state
-      await _showErrorMessage('Failed to get response: ${e.toString()}');
+      await _showErrorMessage('Failed to get response: $e');
+    } finally {
+      if (_typingAnimationController.isAnimating) {
+        _typingAnimationController.stop();
+      }
     }
   }
 
   Future<void> _showErrorMessage(String message) async {
-    final errorId = _uuid.v4();
     final errorMessage = EnhancedChatMessage(
-      id: errorId,
-      text:
-          '⚠️ **Error**: $message\n\nPlease try again or contact support if the issue persists.',
+      id: _uuid.v4(),
+      text: '⚠️ **Error**: $message\n\nPlease try again.',
       isUser: false,
       timestamp: DateTime.now(),
       messageType: 'error',
@@ -285,145 +270,80 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       message: errorMessage,
     );
 
-    // Scroll to bottom after error message is added
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToBottom();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
   }
 
   void _scrollToBottom({bool isInitialScroll = false}) {
-    // Use post-frame callback to ensure the UI has been updated
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _performScrollToBottom(isInitialScroll: isInitialScroll);
+      if (!_scrollController.hasClients) return;
+      final max = _scrollController.position.maxScrollExtent;
+      if (isInitialScroll) {
+        _scrollController.jumpTo(max);
+      } else {
+        _scrollController.animateTo(
+          max,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
-  void _performScrollToBottom({
-    bool isInitialScroll = false,
-    int retryCount = 0,
-  }) {
-    if (!_scrollController.hasClients) return;
-
-    // Get the current max extent
-    final currentMaxExtent = _scrollController.position.maxScrollExtent;
-    final currentPosition = _scrollController.position.pixels;
-
-    // If we're already at the bottom or this is the first message, no need to scroll
-    if (currentMaxExtent == 0 || (currentPosition >= currentMaxExtent - 10)) {
-      return;
-    }
-
-    if (isInitialScroll) {
-      // For initial scroll, jump directly
-      _scrollController.jumpTo(currentMaxExtent);
-    } else {
-      // For new messages, animate to bottom
-      _scrollController
-          .animateTo(
-            currentMaxExtent,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          )
-          .then((_) {
-            // Double-check if we actually reached the bottom after animation
-            // Sometimes the maxScrollExtent changes during animation due to text rendering
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (_scrollController.hasClients) {
-                final newMaxExtent = _scrollController.position.maxScrollExtent;
-                final newPosition = _scrollController.position.pixels;
-
-                // If we're not at the bottom and the content has grown, scroll again
-                if (newPosition < newMaxExtent - 10 && retryCount < 2) {
-                  Future.delayed(const Duration(milliseconds: 50), () {
-                    _performScrollToBottom(
-                      isInitialScroll: false,
-                      retryCount: retryCount + 1,
-                    );
-                  });
-                }
-              }
-            });
-          });
-    }
-  }
-
   Future<void> _clearChat() async {
-    if (_currentSession != null) {
-      await _conversationManager.clearSession(_currentSession!.id);
-      // Refresh current session reference to get updated state
-      _currentSession = await _conversationManager.getOrCreateSession(
-        fileName: widget.fileName,
-        fileType: widget.fileType,
-        filePath: widget.filePath,
-        fileMetadata: widget.fileMetadata,
-      );
-      setState(() {
-        // Trigger rebuild to show cleared chat
-      });
-    }
+    if (_currentSession == null) return;
+    await _conversationManager.clearSession(_currentSession!.id);
+    _currentSession = await _conversationManager.getOrCreateSession(
+      fileName: widget.fileName,
+      fileType: widget.fileType,
+      filePath: widget.filePath,
+      fileMetadata: widget.fileMetadata,
+      fileId: widget.fileId,
+    );
+    setState(() {});
   }
 
   Future<void> _exportChat() async {
     if (_currentSession == null) return;
-
     try {
       final content = await _conversationManager.exportSession(
         sessionId: _currentSession!.id,
         format: ExportFormat.md,
       );
-
       await Clipboard.setData(ClipboardData(text: content));
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Chat exported to clipboard!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Chat exported to clipboard!')),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Export failed: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Export failed: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
   Future<void> _bookmarkMessage(String messageId) async {
     if (_currentSession == null) return;
-
-    final messageIndex = _currentSession!.messages.indexWhere(
-      (m) => m.id == messageId,
+    final idx = _currentSession!.messages.indexWhere((m) => m.id == messageId);
+    if (idx == -1) return;
+    final m = _currentSession!.messages[idx];
+    final updated = m.copyWith(isBookmarked: !m.isBookmarked);
+    await _conversationManager.updateMessage(
+      sessionId: _currentSession!.id,
+      messageId: messageId,
+      updatedMessage: updated,
     );
-    if (messageIndex != -1) {
-      final message = _currentSession!.messages[messageIndex];
-      final updatedMessage = message.copyWith(
-        isBookmarked: !message.isBookmarked,
-      );
-
-      await _conversationManager.updateMessage(
-        sessionId: _currentSession!.id,
-        messageId: messageId,
-        updatedMessage: updatedMessage,
-      );
-
-      // Refresh current session reference to get updated state
-      _currentSession = await _conversationManager.getOrCreateSession(
-        fileName: widget.fileName,
-        fileType: widget.fileType,
-        filePath: widget.filePath,
-        fileMetadata: widget.fileMetadata,
-      );
-
-      setState(() {
-        // Trigger rebuild to show updated bookmark state
-      });
-    }
+    _currentSession = await _conversationManager.getOrCreateSession(
+      fileName: widget.fileName,
+      fileType: widget.fileType,
+      filePath: widget.filePath,
+      fileMetadata: widget.fileMetadata,
+      fileId: widget.fileId,
+    );
+    setState(() {});
   }
 
   @override
@@ -431,7 +351,6 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     if (_isInitializing) {
       return const Center(child: CircularProgressIndicator());
     }
-
     if (_currentSession == null) {
       return Center(
         child: Column(
@@ -449,7 +368,6 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
         ),
       );
     }
-
     return Column(
       children: [
         _buildHeader(),
@@ -515,42 +433,35 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
           _buildSessionInfo(),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
-            tooltip: 'Chat options',
             itemBuilder:
-                (context) => [
-                  PopupMenuItem(
+                (c) => [
+                  const PopupMenuItem(
                     value: 'clear',
-                    child: Row(
-                      children: const [
-                        Icon(Icons.clear_all, size: 18),
-                        SizedBox(width: 8),
-                        Text('Clear chat'),
-                      ],
+                    child: ListTile(
+                      leading: Icon(Icons.clear_all),
+                      title: Text('Clear chat'),
+                      dense: true,
                     ),
                   ),
-                  PopupMenuItem(
+                  const PopupMenuItem(
                     value: 'export',
-                    child: Row(
-                      children: const [
-                        Icon(Icons.download, size: 18),
-                        SizedBox(width: 8),
-                        Text('Export chat'),
-                      ],
+                    child: ListTile(
+                      leading: Icon(Icons.download),
+                      title: Text('Export chat'),
+                      dense: true,
                     ),
                   ),
-                  PopupMenuItem(
+                  const PopupMenuItem(
                     value: 'archive',
-                    child: Row(
-                      children: const [
-                        Icon(Icons.archive, size: 18),
-                        SizedBox(width: 8),
-                        Text('Archive session'),
-                      ],
+                    child: ListTile(
+                      leading: Icon(Icons.archive),
+                      title: Text('Archive session'),
+                      dense: true,
                     ),
                   ),
                 ],
-            onSelected: (value) {
-              switch (value) {
+            onSelected: (v) {
+              switch (v) {
                 case 'clear':
                   _clearChat();
                   break;
@@ -571,8 +482,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   }
 
   Widget _buildSessionInfo() {
-    if (_currentSession == null) return const SizedBox();
-
+    if (_currentSession == null) return const SizedBox.shrink();
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -606,71 +516,48 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: LayoutBuilder(
         builder: (context, constraints) {
+          final role = _buildDropdown(
+            'Role',
+            _selectedRole,
+            _roles,
+            (v) => setState(() => _selectedRole = v),
+          );
+          final doc = _buildDropdown(
+            'Doc Type',
+            _selectedDocType,
+            _docTypes,
+            (v) => setState(() => _selectedDocType = v),
+          );
+          final fmt = _buildDropdown(
+            'Format',
+            _selectedFormat,
+            _formats,
+            (v) => setState(() => _selectedFormat = v),
+          );
           if (constraints.maxWidth < 500) {
             return Column(
               children: [
-                _buildDropdown(
-                  'Role',
-                  _selectedRole,
-                  _roles,
-                  (val) => setState(() => _selectedRole = val),
-                ),
+                role,
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    Expanded(
-                      child: _buildDropdown(
-                        'Doc Type',
-                        _selectedDocType,
-                        _docTypes,
-                        (val) => setState(() => _selectedDocType = val),
-                      ),
-                    ),
+                    Expanded(child: doc),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildDropdown(
-                        'Format',
-                        _selectedFormat,
-                        _formats,
-                        (val) => setState(() => _selectedFormat = val),
-                      ),
-                    ),
+                    Expanded(child: fmt),
                   ],
                 ),
               ],
             );
-          } else {
-            return Row(
-              children: [
-                Expanded(
-                  child: _buildDropdown(
-                    'Role',
-                    _selectedRole,
-                    _roles,
-                    (val) => setState(() => _selectedRole = val),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildDropdown(
-                    'Doc Type',
-                    _selectedDocType,
-                    _docTypes,
-                    (val) => setState(() => _selectedDocType = val),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _buildDropdown(
-                    'Format',
-                    _selectedFormat,
-                    _formats,
-                    (val) => setState(() => _selectedFormat = val),
-                  ),
-                ),
-              ],
-            );
           }
+          return Row(
+            children: [
+              Expanded(child: role),
+              const SizedBox(width: 8),
+              Expanded(child: doc),
+              const SizedBox(width: 8),
+              Expanded(child: fmt),
+            ],
+          );
         },
       ),
     );
@@ -688,9 +575,9 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       items:
           items
               .map(
-                (item) => DropdownMenuItem(
-                  value: item,
-                  child: Text(item, style: const TextStyle(fontSize: 12)),
+                (e) => DropdownMenuItem(
+                  value: e,
+                  child: Text(e, style: const TextStyle(fontSize: 12)),
                 ),
               )
               .toList(),
@@ -710,25 +597,21 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   }
 
   Widget _buildMessageList() {
-    if (_currentSession?.messages.isEmpty ?? true) {
+    if (_currentSession!.messages.isEmpty) {
       return const Center(child: Text('Start a conversation!'));
     }
-
     return ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.all(16),
       itemCount: _currentSession!.messages.length,
-      itemBuilder: (context, index) {
-        final message = _currentSession!.messages[index];
-        return _buildMessageWidget(message);
-      },
+      itemBuilder:
+          (context, i) => _buildMessageWidget(_currentSession!.messages[i]),
     );
   }
 
   Widget _buildMessageWidget(EnhancedChatMessage message) {
     final isUser = message.isUser;
     final isError = message.metadata?['isError'] == true;
-
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       child: Row(
@@ -825,7 +708,6 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             const Spacer(),
-                            // Bookmark button
                             IconButton(
                               onPressed: () => _bookmarkMessage(message.id),
                               icon: Icon(
@@ -843,84 +725,74 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                               tooltip:
                                   message.isBookmarked
                                       ? 'Remove bookmark'
-                                      : 'Bookmark response',
+                                      : 'Bookmark',
                             ),
                             const SizedBox(width: 4),
-                            // Copy button
                             IconButton(
                               onPressed: () {
                                 Clipboard.setData(
                                   ClipboardData(text: message.text),
                                 );
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Copied to clipboard!'),
-                                  ),
+                                  const SnackBar(content: Text('Copied')),
                                 );
                               },
                               icon: const Icon(Icons.copy, size: 16),
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(),
-                              tooltip: 'Copy response',
+                              tooltip: 'Copy',
                             ),
                             const SizedBox(width: 4),
-                            // TTS button
                             if (_isSpeechServiceInitialized)
                               ListenableBuilder(
                                 listenable: _speechService,
-                                builder: (context, child) {
-                                  return IconButton(
-                                    icon: Icon(
-                                      _speechService.isSpeaking &&
-                                              !_speechService.isPaused
-                                          ? Icons.volume_up
-                                          : _speechService.isPaused
-                                          ? Icons.pause
-                                          : Icons.volume_off,
-                                      size: 16,
-                                      color: Colors.grey[600],
-                                    ),
-                                    onPressed: () {
-                                      if (_speechService.isSpeaking) {
-                                        if (_speechService.isPaused) {
-                                          _speechService.speak(message.text);
+                                builder:
+                                    (_, _) => IconButton(
+                                      icon: Icon(
+                                        _speechService.isSpeaking &&
+                                                !_speechService.isPaused
+                                            ? Icons.volume_up
+                                            : _speechService.isPaused
+                                            ? Icons.pause
+                                            : Icons.volume_off,
+                                        size: 16,
+                                        color: Colors.grey[600],
+                                      ),
+                                      onPressed: () {
+                                        if (_speechService.isSpeaking) {
+                                          _speechService.isPaused
+                                              ? _speechService.speak(
+                                                message.text,
+                                              )
+                                              : _speechService.pause();
                                         } else {
-                                          _speechService.pause();
+                                          _speechService.speak(message.text);
                                         }
-                                      } else {
-                                        _speechService.speak(message.text);
-                                      }
-                                    },
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                    tooltip:
-                                        _speechService.isSpeaking
-                                            ? (_speechService.isPaused
-                                                ? 'Resume'
-                                                : 'Pause')
-                                            : 'Read aloud',
-                                  );
-                                },
+                                      },
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(),
+                                      tooltip: 'Read aloud',
+                                    ),
                               ),
-                            // Stop TTS button
                             if (_isSpeechServiceInitialized)
                               ListenableBuilder(
                                 listenable: _speechService,
-                                builder: (context, child) {
-                                  return _speechService.isSpeaking
-                                      ? IconButton(
-                                        icon: Icon(
-                                          Icons.stop,
-                                          size: 16,
-                                          color: Colors.grey[600],
-                                        ),
-                                        onPressed: () => _speechService.stop(),
-                                        padding: EdgeInsets.zero,
-                                        constraints: const BoxConstraints(),
-                                        tooltip: 'Stop reading',
-                                      )
-                                      : const SizedBox.shrink();
-                                },
+                                builder:
+                                    (_, _) =>
+                                        _speechService.isSpeaking
+                                            ? IconButton(
+                                              icon: Icon(
+                                                Icons.stop,
+                                                size: 16,
+                                                color: Colors.grey[600],
+                                              ),
+                                              onPressed: _speechService.stop,
+                                              padding: EdgeInsets.zero,
+                                              constraints:
+                                                  const BoxConstraints(),
+                                              tooltip: 'Stop',
+                                            )
+                                            : const SizedBox.shrink(),
                               ),
                           ],
                         ),
@@ -983,26 +855,25 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
           const SizedBox(width: 8),
           AnimatedBuilder(
             animation: _typingAnimation,
-            builder: (context, child) {
-              return Row(
-                children: List.generate(3, (index) {
-                  return Container(
-                    width: 6,
-                    height: 6,
-                    margin: const EdgeInsets.symmetric(horizontal: 2),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).primaryColor.withOpacity(
+            builder:
+                (context, _) => Row(
+                  children: List.generate(3, (i) {
+                    final opacity =
                         0.3 +
-                            (0.7 *
-                                (((_typingAnimation.value + index * 0.3) %
-                                    1.0))),
+                        (0.7 * (((_typingAnimation.value + i * 0.3) % 1.0)));
+                    return Container(
+                      width: 6,
+                      height: 6,
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          context,
+                        ).primaryColor.withOpacity(opacity),
+                        shape: BoxShape.circle,
                       ),
-                      shape: BoxShape.circle,
-                    ),
-                  );
-                }),
-              );
-            },
+                    );
+                  }),
+                ),
           ),
           const SizedBox(width: 8),
           Text(
@@ -1019,7 +890,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
 
   Widget _buildInputArea() {
     return Container(
-      padding: const EdgeInsets.all(8.0),
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(top: BorderSide(color: Colors.grey[300]!)),
@@ -1028,19 +899,16 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
         children: [
           Expanded(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxHeight: 120, // Set maximum height
-                minHeight: 48, // Set minimum height
-              ),
+              constraints: const BoxConstraints(maxHeight: 120, minHeight: 48),
               child: TextField(
                 controller: _questionController,
                 minLines: 1,
-                maxLines: 4, // cap height; internal scroll after 4 lines
+                maxLines: 4,
                 enabled: !_isLoading,
                 textInputAction: TextInputAction.newline,
                 keyboardType: TextInputType.multiline,
                 decoration: InputDecoration(
-                  hintText: 'Ask a question about ${widget.fileName}...',
+                  hintText: 'Ask about ${widget.fileName}...',
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(24),
                     borderSide: BorderSide(color: Colors.grey[300]!),
@@ -1057,62 +925,59 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                   ),
                   suffixIcon:
                       _isLoading
-                          ? Container(
-                            width: 20,
-                            height: 20,
-                            margin: const EdgeInsets.all(12),
-                            child: const CircularProgressIndicator(
-                              strokeWidth: 2,
+                          ? const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             ),
                           )
                           : null,
                 ),
-                onSubmitted: _isLoading ? null : (value) => _sendMessage(),
+                onSubmitted: _isLoading ? null : (_) => _sendMessage(),
               ),
             ),
           ),
           const SizedBox(width: 8),
-          // STT button
           if (_isSpeechServiceInitialized)
             ListenableBuilder(
               listenable: _speechService,
-              builder: (context, child) {
-                return IconButton(
-                  icon: Icon(
-                    _speechService.isListening ? Icons.mic : Icons.mic_none,
-                    color:
-                        _speechService.isListening
-                            ? Colors.red
-                            : Theme.of(context).primaryColor,
-                  ),
-                  onPressed:
-                      _speechService.speechEnabled && !_isLoading
-                          ? () {
-                            if (_speechService.isListening) {
-                              _speechService.stopListening();
-                            } else {
-                              _speechService.startListening(
-                                onResult: (result) {
-                                  if (result.isNotEmpty) {
-                                    _questionController.text = result;
-                                    setState(() {});
-                                  }
-                                },
-                              );
+              builder:
+                  (_, _) => IconButton(
+                    icon: Icon(
+                      _speechService.isListening ? Icons.mic : Icons.mic_none,
+                      color:
+                          _speechService.isListening
+                              ? Colors.red
+                              : Theme.of(context).primaryColor,
+                    ),
+                    onPressed:
+                        (_speechService.speechEnabled && !_isLoading)
+                            ? () {
+                              if (_speechService.isListening) {
+                                _speechService.stopListening();
+                              } else {
+                                _speechService.startListening(
+                                  onResult: (r) {
+                                    if (r.isNotEmpty) {
+                                      _questionController.text = r;
+                                      setState(() {});
+                                    }
+                                  },
+                                );
+                              }
                             }
-                          }
-                          : null,
-                  style: IconButton.styleFrom(
-                    backgroundColor:
-                        _speechService.isListening
-                            ? Colors.red.withOpacity(0.1)
-                            : Theme.of(context).primaryColor.withOpacity(0.1),
+                            : null,
+                    style: IconButton.styleFrom(
+                      backgroundColor:
+                          _speechService.isListening
+                              ? Colors.red.withOpacity(0.1)
+                              : Theme.of(context).primaryColor.withOpacity(0.1),
+                    ),
                   ),
-                );
-              },
             ),
           const SizedBox(width: 8),
-          // Send button
           IconButton(
             onPressed: _isLoading ? null : () => _sendMessage(),
             icon: Icon(
@@ -1148,18 +1013,12 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     }
   }
 
-  String _formatTime(DateTime timestamp) {
+  String _formatTime(DateTime ts) {
     final now = DateTime.now();
-    final difference = now.difference(timestamp);
-
-    if (difference.inMinutes < 1) {
-      return 'Just now';
-    } else if (difference.inHours < 1) {
-      return '${difference.inMinutes}m ago';
-    } else if (difference.inDays < 1) {
-      return DateFormat('HH:mm').format(timestamp);
-    } else {
-      return DateFormat('MMM d, HH:mm').format(timestamp);
-    }
+    final diff = now.difference(ts);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inHours < 1) return '${diff.inMinutes}m ago';
+    if (diff.inDays < 1) return DateFormat('HH:mm').format(ts);
+    return DateFormat('MMM d, HH:mm').format(ts);
   }
 }

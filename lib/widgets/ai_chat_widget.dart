@@ -9,6 +9,7 @@ class AIChatWidget extends StatefulWidget {
   final String fileName;
   final String fileType;
   final String fileContent;
+  final String? fileId; // NEW (pass from parent for stable per-file session)
   final VoidCallback? onInteractionSuccess;
 
   const AIChatWidget({
@@ -16,6 +17,7 @@ class AIChatWidget extends StatefulWidget {
     required this.fileName,
     required this.fileType,
     required this.fileContent,
+    this.fileId,
     this.onInteractionSuccess,
   });
 
@@ -23,17 +25,26 @@ class AIChatWidget extends StatefulWidget {
   State<AIChatWidget> createState() => _AIChatWidgetState();
 }
 
-class _AIChatWidgetState extends State<AIChatWidget> {
+class _AIChatWidgetState extends State<AIChatWidget>
+    with AutomaticKeepAliveClientMixin {
   final TextEditingController _questionController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final AIService _aiService = AIService();
 
-  final List<ChatMessage> _messages = [];
-  bool _isLoading = false;
+  // In‑memory per-file message cache (simple; could swap to ConversationManager)
+  static final Map<String, List<ChatMessage>> _sessionMessages = {};
+  static final Set<String> _welcomeInjected = {};
+
+  late final String _sessionKey;
+
+  // Replaces ambiguous _isLoading for send lifecycle control
+  bool _isSending = false;
+  bool _aiTyping = false;
   String? _errorMessage;
 
-  // For typing indicator
-  bool _aiTyping = false;
+  // Debounce / duplicate suppression
+  String? _lastSentText;
+  DateTime? _lastSentAt;
 
   // Quick prompt suggestions
   final List<String> _quickPrompts = [
@@ -60,17 +71,33 @@ class _AIChatWidgetState extends State<AIChatWidget> {
   String? _selectedDocType;
   String? _selectedFormat;
 
+  // Replace the original initialization of _messages:
+  late List<ChatMessage>
+  _messages; // (was final List<ChatMessage> _messages = [])
+
   @override
   void initState() {
     super.initState();
-    _addWelcomeMessage();
+    _sessionKey = widget.fileId ?? '${widget.fileName}_${widget.fileType}';
+
+    // Reuse existing messages if present; else create list
+    if (_sessionMessages[_sessionKey] == null) {
+      _sessionMessages[_sessionKey] = <ChatMessage>[];
+    }
+    _messages = _sessionMessages[_sessionKey]!;
+
+    // Inject welcome only once per session key
+    if (!_welcomeInjected.contains(_sessionKey)) {
+      _addWelcomeMessage();
+      _welcomeInjected.add(_sessionKey);
+    }
   }
 
   void _addWelcomeMessage() {
     _messages.add(
       ChatMessage(
         text:
-            'Hello! I\'m FileGenius AI. I can help you analyze "${widget.fileName}" and answer questions about it. What would you like to know?',
+            'Hello! I\'m FileGenius AI. I can help you analyze "${widget.fileName}". Ask anything when ready.',
         isUser: false,
         timestamp: DateTime.now(),
       ),
@@ -85,16 +112,32 @@ class _AIChatWidgetState extends State<AIChatWidget> {
   }
 
   Future<void> _sendMessage({String? prompt}) async {
-    final question = prompt ?? _questionController.text.trim();
+    final raw = prompt ?? _questionController.text;
+    final question = raw.trim();
     if (question.isEmpty) return;
 
+    // Prevent re-entry while sending
+    if (_isSending) return;
+
+    // Ignore exact duplicate within short window (2 seconds)
+    final now = DateTime.now();
+    if (_lastSentText != null &&
+        _lastSentText == question &&
+        _lastSentAt != null &&
+        now.difference(_lastSentAt!) < const Duration(seconds: 2)) {
+      debugPrint('Skipped duplicate prompt: $question');
+      return;
+    }
+    _lastSentText = question;
+    _lastSentAt = now;
+
     setState(() {
+      _isSending = true;
+      _aiTyping = true;
+      _errorMessage = null;
       _messages.add(
         ChatMessage(text: question, isUser: true, timestamp: DateTime.now()),
       );
-      _isLoading = true;
-      _aiTyping = true;
-      _errorMessage = null;
     });
 
     _questionController.clear();
@@ -111,10 +154,11 @@ class _AIChatWidgetState extends State<AIChatWidget> {
         preferredFormat: _selectedFormat,
       );
 
-      setState(() {
-        _isLoading = false;
-        _aiTyping = false;
-        if (response.success) {
+      if (!mounted) return;
+
+      if (response.success) {
+        setState(() {
+          _aiTyping = false;
           _messages.add(
             ChatMessage(
               text: response.data!['answer'],
@@ -122,33 +166,38 @@ class _AIChatWidgetState extends State<AIChatWidget> {
               timestamp: DateTime.now(),
             ),
           );
-          // Call the success callback to award points
-          widget.onInteractionSuccess?.call();
-        } else {
+        });
+        widget.onInteractionSuccess?.call();
+      } else {
+        setState(() {
+          _aiTyping = false;
           _errorMessage = response.message;
-
-          // If it's a rate limit error, show a helpful message
           if (response.message.contains('Rate limit')) {
             _messages.add(
               ChatMessage(
                 text:
-                    '⚠️ **Rate Limit Reached**\n\nI\'ve hit the OpenAI rate limit. ${response.message}\n\n**What you can do:**\n• Wait for the specified time and try again\n• Check your usage at https://platform.openai.com/usage\n• Consider upgrading your OpenAI plan for higher limits\n• Try asking a shorter question next time',
+                    '⚠️ **Rate Limit Reached**\n\n${response.message}\n\n**Suggestions:**\n• Wait and retry\n• Check usage dashboard\n• Shorten the question\n• Consider upgrading your plan',
                 isUser: false,
                 timestamp: DateTime.now(),
               ),
             );
           }
-        }
-      });
+        });
+      }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
-        _isLoading = false;
         _aiTyping = false;
-        _errorMessage = 'Failed to get response: ${e.toString()}';
+        _errorMessage = 'Failed to get response: $e';
       });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+        });
+        _scrollToBottom();
+      }
     }
-
-    _scrollToBottom();
   }
 
   void _scrollToBottom() {
@@ -165,6 +214,7 @@ class _AIChatWidgetState extends State<AIChatWidget> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // needed for AutomaticKeepAliveClientMixin
     return Column(
       children: [
         // Header with quick actions and menu
@@ -225,6 +275,7 @@ class _AIChatWidgetState extends State<AIChatWidget> {
                   if (value == 'clear') {
                     setState(() {
                       _messages.clear();
+                      _welcomeInjected.remove(_sessionKey);
                       _addWelcomeMessage();
                     });
                   }
@@ -247,7 +298,7 @@ class _AIChatWidgetState extends State<AIChatWidget> {
                   return ActionChip(
                     label: Text(prompt),
                     onPressed:
-                        _isLoading ? null : () => _sendMessage(prompt: prompt),
+                        _isSending ? null : () => _sendMessage(prompt: prompt),
                     backgroundColor: Theme.of(
                       context,
                     ).primaryColor.withOpacity(0.12),
@@ -411,7 +462,6 @@ class _AIChatWidgetState extends State<AIChatWidget> {
                           ),
                         );
                       }
-
                       final message = _messages[index];
                       return ChatMessageWidget(message: message);
                     },
@@ -463,8 +513,8 @@ class _AIChatWidgetState extends State<AIChatWidget> {
               Expanded(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(
-                    maxHeight: 120, // Maximum height for the text input
-                    minHeight: 48, // Minimum height
+                    maxHeight: 120,
+                    minHeight: 48,
                   ),
                   child: TextField(
                     controller: _questionController,
@@ -479,10 +529,11 @@ class _AIChatWidgetState extends State<AIChatWidget> {
                       ),
                     ),
                     minLines: 1,
-                    maxLines: 4, // capped for internal scroll
+                    maxLines: 4,
                     textInputAction: TextInputAction.send,
                     keyboardType: TextInputType.multiline,
                     onSubmitted: (_) => _sendMessage(),
+                    enabled: !_isSending,
                   ),
                 ),
               ),
@@ -495,15 +546,15 @@ class _AIChatWidgetState extends State<AIChatWidget> {
                   height: 48,
                   decoration: BoxDecoration(
                     color:
-                        _isLoading
+                        _isSending
                             ? Colors.grey
                             : Theme.of(context).primaryColor,
                     borderRadius: BorderRadius.circular(24),
                   ),
                   child: IconButton(
-                    onPressed: _isLoading ? null : _sendMessage,
+                    onPressed: _isSending ? null : _sendMessage,
                     icon:
-                        _isLoading
+                        _isSending
                             ? const SizedBox(
                               width: 20,
                               height: 20,
@@ -522,6 +573,9 @@ class _AIChatWidgetState extends State<AIChatWidget> {
       ],
     );
   }
+
+  @override
+  bool get wantKeepAlive => true;
 }
 
 class ChatMessage {
