@@ -6,6 +6,8 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+typedef VoidCallback = void Function();
+
 class SpeechService extends ChangeNotifier {
   static final SpeechService _instance = SpeechService._internal();
   factory SpeechService() => _instance;
@@ -15,6 +17,7 @@ class SpeechService extends ChangeNotifier {
   final FlutterTts _flutterTts = FlutterTts();
   bool _isSpeaking = false;
   bool _isPaused = false;
+  bool _ttsReady = false;
 
   // STT variables
   final SpeechToText _speechToText = SpeechToText();
@@ -57,15 +60,27 @@ class SpeechService extends ChangeNotifier {
       _isPaused = false;
       notifyListeners();
     });
+    _ttsReady = true;
   }
 
-  Future<void> speak(String text) async {
+  Future<void> speak(String text, {VoidCallback? onComplete}) async {
     if (text.isNotEmpty) {
+      if (!_ttsReady) await _initializeTts();
       await _flutterTts.speak(text);
     }
+    onComplete?.call();
+  }
+
+  Future<void> speakText(String text) async {
+    if (text.isEmpty) return;
+    if (!_ttsReady) await _initializeTts();
+    // Stop any current speech before starting new
+    await _flutterTts.stop();
+    await _flutterTts.speak(text);
   }
 
   Future<void> stop() async {
+    // await _tts.stop();
     await _flutterTts.stop();
     _isSpeaking = false;
     _isPaused = false;

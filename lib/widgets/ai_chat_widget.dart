@@ -11,6 +11,7 @@ class AIChatWidget extends StatefulWidget {
   final String fileContent;
   final String? fileId; // NEW (pass from parent for stable per-file session)
   final VoidCallback? onInteractionSuccess;
+  final bool autoSummarize; // NEW
 
   const AIChatWidget({
     super.key,
@@ -19,6 +20,7 @@ class AIChatWidget extends StatefulWidget {
     required this.fileContent,
     this.fileId,
     this.onInteractionSuccess,
+    this.autoSummarize = false, // NEW
   });
 
   @override
@@ -75,6 +77,9 @@ class _AIChatWidgetState extends State<AIChatWidget>
   late List<ChatMessage>
   _messages; // (was final List<ChatMessage> _messages = [])
 
+  bool _summaryRequested = false; // NEW
+  List<String> _dynamicFollowUps = []; // NEW
+
   @override
   void initState() {
     super.initState();
@@ -90,6 +95,13 @@ class _AIChatWidgetState extends State<AIChatWidget>
     if (!_welcomeInjected.contains(_sessionKey)) {
       _addWelcomeMessage();
       _welcomeInjected.add(_sessionKey);
+    }
+
+    // Trigger auto summary only once per session & if requested
+    if (widget.autoSummarize && !_summaryRequested) {
+      _summaryRequested = true;
+      // Delay to allow first frame
+      WidgetsBinding.instance.addPostFrameCallback((_) => _runAutoSummary());
     }
   }
 
@@ -200,6 +212,46 @@ class _AIChatWidgetState extends State<AIChatWidget>
     }
   }
 
+  Future<void> _runAutoSummary() async {
+    setState(() {
+      _aiTyping = true;
+    });
+    final res = await _aiService.summarizeFile(
+      fileName: widget.fileName,
+      fileType: widget.fileType,
+      fileContent: widget.fileContent,
+      userRole: _selectedRole,
+      docType: _selectedDocType,
+      preferredFormat: _selectedFormat,
+    );
+    if (!mounted) return;
+    setState(() {
+      _aiTyping = false;
+      if (res.success) {
+        final summary = res.data?['summary'] ?? 'No summary returned.';
+        _messages.add(
+          ChatMessage(
+            text: '**Auto Summary**\n\n$summary',
+            isUser: false,
+            timestamp: DateTime.now(),
+          ),
+        );
+        _dynamicFollowUps =
+            (res.data?['follow_ups'] as List?)?.cast<String>() ?? [];
+      } else {
+        _messages.add(
+          ChatMessage(
+            text:
+                'Failed to auto-summarize this file. You can still ask questions.\n\nError: ${res.message}',
+            isUser: false,
+            timestamp: DateTime.now(),
+          ),
+        );
+      }
+    });
+    _scrollToBottom();
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scrollController.hasClients) {
@@ -293,21 +345,39 @@ class _AIChatWidgetState extends State<AIChatWidget>
           child: Wrap(
             spacing: 8,
             runSpacing: 4,
-            children:
-                _quickPrompts.map((prompt) {
-                  return ActionChip(
-                    label: Text(prompt),
-                    onPressed:
-                        _isSending ? null : () => _sendMessage(prompt: prompt),
-                    backgroundColor: Theme.of(
-                      context,
-                    ).primaryColor.withOpacity(0.12),
-                    labelStyle: TextStyle(
-                      color: Theme.of(context).primaryColor,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  );
-                }).toList(),
+            children: [
+              // Original static prompts
+              ..._quickPrompts.map((prompt) {
+                return ActionChip(
+                  label: Text(prompt),
+                  onPressed:
+                      _isSending ? null : () => _sendMessage(prompt: prompt),
+                  backgroundColor: Theme.of(
+                    context,
+                  ).primaryColor.withOpacity(0.12),
+                  labelStyle: TextStyle(
+                    color: Theme.of(context).primaryColor,
+                    fontWeight: FontWeight.w500,
+                  ),
+                );
+              }),
+              if (_dynamicFollowUps.isNotEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(left: 4),
+                  child: Text(
+                    'Follow-ups:',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              // Dynamic follow-up chips
+              ..._dynamicFollowUps.map((q) {
+                return InputChip(
+                  label: Text(q),
+                  onPressed: _isSending ? null : () => _sendMessage(prompt: q),
+                  tooltip: 'Ask this follow-up',
+                );
+              }),
+            ],
           ),
         ),
 
