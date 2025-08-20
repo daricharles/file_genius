@@ -6,43 +6,40 @@ import 'question_suggestions_service.dart';
 
 class FileAnalysisOrchestrator extends ChangeNotifier {
   final FileContentExtractor extractor;
-  final AIService ai;
-  final QuestionSuggestionsService questions;
+  final AIService aiService;
+  final QuestionSuggestionsService questionSuggestions;
 
   FileAnalysisOrchestrator({
     required this.extractor,
-    required this.ai,
-    required this.questions,
+    required this.aiService,
+    required this.questionSuggestions,
   });
 
   Future<FileMeta> analyzeFile(FileMeta file) async {
-    FileMeta working = file.copyWith(isAnalyzing: true);
+    var working = file.copyWith(isAnalyzing: true);
     notifyListeners();
     try {
       String extracted = working.extractedText ?? '';
       if (extracted.isEmpty) {
-        // Try static extractor (method expects named params)
         try {
           extracted = await FileContentExtractor.extractContent(
             fileUrl: working.url,
             fileType: working.type,
             fileName: working.name,
           );
-        } catch (_) {
-          // fallback silent
-        }
+        } catch (_) {}
         working = working.copyWith(extractedText: extracted);
       }
 
       final truncated =
           extracted.length > 9000 ? extracted.substring(0, 9000) : extracted;
 
-      final summary = await ai.generateFileSummary(
+      final summary = await aiService.generateFileSummary(
         fileName: working.name,
         content: truncated,
       );
 
-      final qs = await questions.generateFollowUpQuestions(
+      final qs = await questionSuggestions.generateFollowUpQuestions(
         fileName: working.name,
         summary: summary,
         excerpt: truncated.substring(0, truncated.length.clamp(0, 4000)),

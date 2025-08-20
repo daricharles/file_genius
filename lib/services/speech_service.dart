@@ -6,38 +6,39 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-typedef VoidCallback = void Function();
-
 class SpeechService extends ChangeNotifier {
-  static final SpeechService _instance = SpeechService._internal();
-  factory SpeechService() => _instance;
-  SpeechService._internal();
+  // (Optional) remove singleton if not strictly needed with Provider.
+  // static final SpeechService _instance = SpeechService._internal();
+  // factory SpeechService() => _instance;
+  // SpeechService._internal();
+  SpeechService(); // simple constructor
 
-  // TTS variables
   final FlutterTts _flutterTts = FlutterTts();
   bool _isSpeaking = false;
   bool _isPaused = false;
   bool _ttsReady = false;
 
-  // STT variables
   final SpeechToText _speechToText = SpeechToText();
   bool _isListening = false;
   bool _speechEnabled = false;
   String _lastWords = '';
 
-  // Getters
+  bool _ready = false;
+
   bool get isSpeaking => _isSpeaking;
   bool get isPaused => _isPaused;
   bool get isListening => _isListening;
   bool get speechEnabled => _speechEnabled;
   String get lastWords => _lastWords;
+  bool get isReady => _ready;
 
   Future<void> initialize() async {
     await _initializeTts();
     await _initializeStt();
+    _ready = true;
+    notifyListeners();
   }
 
-  // TTS Methods
   Future<void> _initializeTts() async {
     await _flutterTts.setLanguage('en-US');
     await _flutterTts.setSpeechRate(0.5);
@@ -55,7 +56,7 @@ class SpeechService extends ChangeNotifier {
       notifyListeners();
     });
 
-    _flutterTts.setErrorHandler((msg) {
+    _flutterTts.setErrorHandler((_) {
       _isSpeaking = false;
       _isPaused = false;
       notifyListeners();
@@ -74,13 +75,11 @@ class SpeechService extends ChangeNotifier {
   Future<void> speakText(String text) async {
     if (text.isEmpty) return;
     if (!_ttsReady) await _initializeTts();
-    // Stop any current speech before starting new
     await _flutterTts.stop();
     await _flutterTts.speak(text);
   }
 
   Future<void> stop() async {
-    // await _tts.stop();
     await _flutterTts.stop();
     _isSpeaking = false;
     _isPaused = false;
@@ -93,16 +92,14 @@ class SpeechService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // STT Methods
   Future<void> _initializeStt() async {
-    // Request microphone permission
-    var status = await Permission.microphone.request();
+    final status = await Permission.microphone.request();
     if (status != PermissionStatus.granted) {
       return;
     }
 
     _speechEnabled = await _speechToText.initialize(
-      onError: (error) {
+      onError: (_) {
         _isListening = false;
         notifyListeners();
       },
@@ -120,7 +117,6 @@ class SpeechService extends ChangeNotifier {
     if (!_speechEnabled) {
       await _initializeStt();
     }
-
     if (_speechEnabled && !_isListening) {
       _lastWords = '';
       _isListening = true;
@@ -129,11 +125,9 @@ class SpeechService extends ChangeNotifier {
       await _speechToText.listen(
         onResult: (result) {
           _lastWords = result.recognizedWords;
-          if (result.finalResult) {
-            onResult(_lastWords);
-            _isListening = false;
-            notifyListeners();
-          }
+          onResult(_lastWords);
+          _isListening = result.finalResult ? false : _isListening;
+          notifyListeners();
         },
         listenFor: const Duration(seconds: 30),
         pauseFor: const Duration(seconds: 3),

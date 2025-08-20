@@ -14,6 +14,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
+import 'services/speech_service.dart';
 
 // Firebase
 import 'package:firebase_core/firebase_core.dart';
@@ -35,7 +36,6 @@ import 'main_pane.dart';
 import 'models.dart';
 import 'dash_board.dart';
 import 'user_profile.dart';
-import 'services/speech_service.dart';
 import 'services/file_analysis_orchestrator.dart';
 import 'services/file_content_extractor.dart';
 import 'services/ai_service.dart';
@@ -212,29 +212,38 @@ Future<void> main() async {
   await _initNotifications();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await dotenv.load();
-
-  // Register WebView platform for web
   if (kIsWeb) {
     WebViewPlatform.instance = WebWebViewPlatform();
   }
 
-  // Initialize speech service
-  await SpeechService().initialize();
-
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => PaneController()),
-        ChangeNotifierProvider(
-          create:
-              (_) => FileAnalysisOrchestrator(
-                extractor: FileContentExtractor(),
-                ai: AIService(),
-                questions: QuestionSuggestionsService(aiService: AIService()),
+        ChangeNotifierProvider<SpeechService>(
+          create: (_) => SpeechService()..initialize(),
+        ),
+        // Core analysis services (now the imports are used)
+        Provider<FileContentExtractor>(create: (_) => FileContentExtractor()),
+        Provider<AIService>(create: (_) => AIService()),
+        ProxyProvider<AIService, QuestionSuggestionsService>(
+          update:
+              (_, aiService, _) =>
+                  QuestionSuggestionsService(aiService: aiService),
+        ),
+        // Orchestrator that depends on the above.
+        ProxyProvider3<
+          FileContentExtractor,
+          AIService,
+          QuestionSuggestionsService,
+          FileAnalysisOrchestrator
+        >(
+          update:
+              (_, extractor, ai, qs, previous) => FileAnalysisOrchestrator(
+                extractor: extractor,
+                aiService: ai,
+                questionSuggestions: qs,
               ),
         ),
-        Provider.value(value: SpeechService()),
-        // ...existing providers...
       ],
       child: const FileGeniusApp(),
     ),
