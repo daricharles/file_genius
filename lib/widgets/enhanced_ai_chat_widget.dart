@@ -16,9 +16,10 @@ class EnhancedAIChatWidget extends StatefulWidget {
   final String fileType;
   final String fileContent;
   final String filePath;
-  final String? fileId; // added earlier
-  final Map<String, dynamic>? fileMetadata; // ADDED to satisfy uses
+  final String? fileId;
+  final Map<String, dynamic>? fileMetadata; // stays
   final VoidCallback? onInteractionSuccess;
+  final bool autoSummarize;
 
   const EnhancedAIChatWidget({
     super.key,
@@ -26,9 +27,10 @@ class EnhancedAIChatWidget extends StatefulWidget {
     required this.fileType,
     required this.fileContent,
     required this.filePath,
-    this.fileId,
-    this.fileMetadata,
+    required this.fileId,
+    this.fileMetadata, // <-- ADDED (initializes final field)
     this.onInteractionSuccess,
+    this.autoSummarize = false,
   });
 
   @override
@@ -39,7 +41,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     with SingleTickerProviderStateMixin {
   final TextEditingController _questionController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final AIService _aiService = AIService();
+  final AIService _aiService = AIService(); // ensure available
   final ConversationManager _conversationManager = ConversationManager.instance;
   final Uuid _uuid = const Uuid();
   final SpeechService _speechService = SpeechService();
@@ -49,6 +51,8 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   bool _isInitializing = true;
   bool _aiTyping = false;
   bool _isSpeechServiceInitialized = false;
+  bool _aiBusy = false;
+  bool _autoSummaryRun = false; // NEW
 
   String? _selectedRole;
   String? _selectedDocType;
@@ -82,12 +86,59 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     'Other',
   ];
 
+  List<String> _followUps = []; // NEW
+
   @override
   void initState() {
     super.initState();
     _initializeAnimations();
     _initializeChat();
     _initializeSpeechService();
+    if (widget.autoSummarize) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _runAutoSummary());
+    }
+  }
+
+  Future<void> _runAutoSummary() async {
+    if (_autoSummaryRun || _aiBusy || widget.fileContent.trim().isEmpty) return;
+    setState(() {
+      _aiBusy = true;
+    });
+    final res = await _aiService.summarizeFile(
+      fileName: widget.fileName,
+      fileType: widget.fileType,
+      fileContent: widget.fileContent,
+    );
+    if (!mounted) return;
+    setState(() {
+      _aiBusy = false;
+      _autoSummaryRun = true;
+      if (res.success) {
+        final summary = (res.data?['summary'] ?? '').toString();
+        _appendAIMessage('**Summary**\n\n$summary');
+        _followUps = (res.data?['follow_ups'] as List?)?.cast<String>() ?? [];
+      } else {
+        _appendAIMessage(
+          'Auto summary failed: ${res.message}. You can still ask questions.',
+        );
+      }
+    });
+  }
+
+  void _appendAIMessage(String text) {
+    if (_currentSession == null) return;
+    setState(() {
+      _currentSession!.messages.add(
+        EnhancedChatMessage(
+          id: _uuid.v4(),
+          text: text,
+          isUser: false,
+          timestamp: DateTime.now(),
+          messageType: 'summary', // or 'response' if preferred
+        ),
+      );
+    });
+    _scrollToBottom();
   }
 
   void _initializeAnimations() {
@@ -389,8 +440,28 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
         Expanded(child: _buildMessageList()),
         if (_aiTyping) _buildTypingIndicator(),
         _buildInputArea(),
+        if (_followUps.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children:
+                  _followUps.map((q) {
+                    return ActionChip(
+                      label: Text(q),
+                      onPressed: _aiBusy ? null : () => _sendUserPrompt(q),
+                    );
+                  }).toList(),
+            ),
+          ),
       ],
     );
+  }
+
+  void _sendUserPrompt(String prompt) {
+    // reuse existing send logic
+    _sendMessage(prompt: prompt);
   }
 
   Widget _buildHeader() {

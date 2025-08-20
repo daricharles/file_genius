@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:provider/provider.dart';
 
 // Firebase
 import 'package:firebase_core/firebase_core.dart';
@@ -35,6 +36,10 @@ import 'models.dart';
 import 'dash_board.dart';
 import 'user_profile.dart';
 import 'services/speech_service.dart';
+import 'services/file_analysis_orchestrator.dart';
+import 'services/file_content_extractor.dart';
+import 'services/ai_service.dart';
+import 'services/question_suggestions_service.dart';
 
 /// Achievement notification dialog with animations
 class AchievementDialog extends StatefulWidget {
@@ -216,7 +221,24 @@ Future<void> main() async {
   // Initialize speech service
   await SpeechService().initialize();
 
-  runApp(const FileGeniusApp());
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => PaneController()),
+        ChangeNotifierProvider(
+          create:
+              (_) => FileAnalysisOrchestrator(
+                extractor: FileContentExtractor(),
+                ai: AIService(),
+                questions: QuestionSuggestionsService(aiService: AIService()),
+              ),
+        ),
+        Provider.value(value: SpeechService()),
+        // ...existing providers...
+      ],
+      child: const FileGeniusApp(),
+    ),
+  );
 }
 
 /// The root widget that gates access based on authentication state.
@@ -1261,7 +1283,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     Folder? target,
   ) async {
     if (dropped.isEmpty) return;
-    final folderId = target?.id; // null → top level
+    final folderId = target?.id;
 
     setState(() {
       _isUploading = true;
@@ -1269,35 +1291,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _loadingMessage = 'Uploading files...';
     });
 
-    // optimistic UI
-    final stubs = dropped.map(
-      (p) => FileMeta(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        name: p.name,
-        size: p.size,
-        url: 'uploading…',
-        type: p.extension ?? '',
-        uploadedAt: DateTime.now(),
-        folderId: folderId,
-      ),
-    );
+    FileMeta? firstReal;
 
-    if (mounted) {
-      setState(() {
-        if (folderId == null) {
-          _topLevelFiles.addAll(stubs);
-        } else {
-          _filesByFolder.putIfAbsent(folderId, () => []).addAll(stubs);
-        }
-      });
-    }
-
-    // real upload
     int completed = 0;
     for (final p in dropped) {
       try {
         final meta = await _uploadOne(pFile: p, folderId: folderId);
-        _replaceStub(meta);
+        firstReal ??= meta;
         completed++;
         if (mounted) {
           setState(() {
@@ -1317,7 +1317,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
     }
 
+    if (firstReal != null) {
+      // Auto-select and analyze
+      _startAutoAnalysis(firstReal);
+    }
+
     _snack('$completed file(s) uploaded successfully');
+  }
+
+  // Add helper method below in _HomeScreenState:
+
+  void _updateFileMeta(FileMeta updated) {
+    final list =
+        updated.folderId == null
+            ? _topLevelFiles
+            : _filesByFolder[updated.folderId] ?? [];
+    final idx = list.indexWhere((f) => f.id == updated.id);
+    if (idx != -1) {
+      list[idx] = updated;
+    }
+  }
+
+  void _startAutoAnalysis(FileMeta file) async {
+    setState(() => _previewFile = file);
+    final orchestrator = context.read<FileAnalysisOrchestrator>();
+    final analyzed = await orchestrator.analyzeFile(file);
+    if (!mounted) return;
+    setState(() {
+      _updateFileMeta(analyzed);
+      if (_previewFile?.id == analyzed.id) {
+        _previewFile = analyzed;
+      }
+    });
   }
 
   Future<FileMeta> _uploadOne({
@@ -1360,24 +1391,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       folderId: folderId,
     );
 
-    // Track badge progress
     _onFileUploadSuccess(result);
-
     return result;
   }
 
-  void _replaceStub(FileMeta real) {
-    if (mounted) {
-      setState(() {
-        final list =
-            real.folderId == null
-                ? _topLevelFiles
-                : _filesByFolder[real.folderId]!;
-        final idx = list.indexWhere((m) => m.name == real.name);
-        if (idx != -1) list[idx] = real;
-      });
-    }
-  }
+  // Remove (or comment out) the unused _replaceStub method if present.
 
   /* data deletion & modification */
 
@@ -1800,13 +1818,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _studyTickTimer?.cancel();
     _studyTickTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       // Periodically accumulate partial time so dashboard feels live
-      if (_currentStudyStart != null) {
-        _endStudySession(flush: false);
-        // Restart session (continuous)
-        if (_currentStudySubject != null) {
-          _currentStudyStart = DateTime.now();
-        }
-        _syncDashboardToFirestore();
+      if (_currentStudyStart != null && _currentStudySubject != null) {
+        // Preserve subject before ending (since _endStudySession clears it)
+        final subject = _currentStudySubject!;
+        _endStudySession(
+          flush: false,
+        ); // adds elapsed time without flushing to Firestore
+        // Restart continuous session
+        _currentStudySubject = subject;
+        _currentStudyStart = DateTime.now();
+        _syncDashboardToFirestore(); // now push updated cumulative study time
       }
     });
   }

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart';
@@ -262,5 +263,20 @@ ${folderName != null ? '- Folder: $folderName' : ''}
           'Analyze the file structure',
         ];
     }
+  }
+
+  // NEW: bytes-based fallback when we have local file bytes (drag & drop)
+  static Future<String> extractFromBytes({
+    required Uint8List bytes,
+    required String fileName,
+    required String fileType,
+  }) async {
+    // Try UTF‑8 decode; if it fails, return placeholder.
+    try {
+      final text = utf8.decode(bytes, allowMalformed: true);
+      if (text.trim().isNotEmpty) return text;
+    } catch (_) {}
+    // If you add PDF / DOCX parsing for raw bytes, hook it here.
+    return '[Extracted $fileType content for $fileName is not plain text or needs specialized parser]';
   }
 }

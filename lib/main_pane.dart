@@ -56,7 +56,8 @@ class MainPane extends StatefulWidget {
 class _MainPaneState extends State<MainPane> {
   final Map<String, String> _fileContentCache = {};
   Future<String>? _fileContentFuture;
-  String? _fileContentFutureKey; // cacheKey the future corresponds to
+  String? _fileContentFutureKey;
+  final Set<String> _autoSummarized = {}; // now used
 
   @override
   void initState() {
@@ -88,26 +89,55 @@ class _MainPaneState extends State<MainPane> {
       return;
     }
     final cacheKey = '${file.id}_${file.name}';
-    // Reuse if we already have a future for this cacheKey
-    if (_fileContentFuture != null && _fileContentFutureKey == cacheKey) {
+    if (_fileContentFuture != null && _fileContentFutureKey == cacheKey) return;
+
+    // If we already cached (e.g. just uploaded locally)
+    if (_fileContentCache.containsKey(cacheKey)) {
+      _fileContentFuture = Future.value(_fileContentCache[cacheKey]!);
+      _fileContentFutureKey = cacheKey;
       return;
     }
 
-    if (_fileContentCache.containsKey(cacheKey)) {
-      // Immediate future with cached value
-      _fileContentFuture = Future.value(_fileContentCache[cacheKey]!);
+    // Skip remote extraction if url is empty (local temp)
+    if (file.url.isEmpty) {
+      _fileContentFuture = Future.value('');
       _fileContentFutureKey = cacheKey;
-    } else {
-      _fileContentFuture = FileContentExtractor.extractContent(
-        fileUrl: file.url,
-        fileType: file.type,
-        fileName: file.name,
-      ).then((content) {
-        _fileContentCache[cacheKey] = content;
-        return content;
-      });
-      _fileContentFutureKey = cacheKey;
+      return;
     }
+
+    _fileContentFuture = FileContentExtractor.extractContent(
+      fileUrl: file.url,
+      fileType: file.type,
+      fileName: file.name,
+    ).then((content) {
+      _fileContentCache[cacheKey] = content;
+      return content;
+    });
+    _fileContentFutureKey = cacheKey;
+  }
+
+  // REPLACED _handleFileReady to convert FileItem -> FileMeta and inject content cache
+  void _handleFileReady(FileItem f) {
+    final folderId = widget.selectedFolder?.id ?? '';
+    final meta = FileMeta(
+      id: f.id,
+      name: f.name,
+      type: f.type,
+      size: f.size,
+      url: '', // local (no remote URL yet)
+      folderId: folderId, // REQUIRED
+      uploadedAt: DateTime.now(), // REQUIRED
+    );
+
+    final cacheKey = '${meta.id}_${meta.name}';
+    _fileContentCache[cacheKey] = f.content;
+
+    setState(() {
+      widget.files.add(meta);
+      widget.onSelectFile?.call(meta); // auto select -> opens panes
+      _fileContentFuture = Future.value(f.content);
+      _fileContentFutureKey = cacheKey;
+    });
   }
 
   @override
@@ -117,6 +147,9 @@ class _MainPaneState extends State<MainPane> {
       final supported = FileContentExtractor.supportsAIAnalysis(
         widget.previewFile!.type,
       );
+      final shouldAutoSummarize = _autoSummarized.add(
+        widget.previewFile!.id,
+      ); // true first time only
 
       return Row(
         children: [
@@ -178,13 +211,8 @@ class _MainPaneState extends State<MainPane> {
                 ),
                 const Divider(height: 1),
                 // File viewer
-                Expanded(
-                  child: FileViewer(
-                    key: ValueKey('file_viewer_${widget.previewFile!.id}'),
-                    fileUrl: widget.previewFile!.url,
-                    fileType: widget.previewFile!.type.toLowerCase(),
-                  ),
-                ),
+                // widget.previewFile is guaranteed non-null in this branch
+                Expanded(child: FileViewer(file: widget.previewFile!)),
               ],
             ),
           ),
@@ -230,7 +258,6 @@ class _MainPaneState extends State<MainPane> {
                       ),
                     )
                     : FutureBuilder<String>(
-                      // CHANGED: use the memoized future
                       future: _fileContentFuture,
                       builder: (context, snapshot) {
                         if (snapshot.connectionState ==
@@ -255,7 +282,7 @@ class _MainPaneState extends State<MainPane> {
                                 Icon(
                                   Icons.error_outline,
                                   size: 64,
-                                  color: Colors.red[400],
+                                  color: Colors.redAccent,
                                 ),
                                 const SizedBox(height: 16),
                                 Text(
@@ -279,7 +306,6 @@ class _MainPaneState extends State<MainPane> {
                           );
                         }
 
-                        // Use a stable key that includes file ID to prevent recreation
                         return EnhancedAIChatWidget(
                           key: ValueKey(
                             'enhanced_ai_chat_${widget.previewFile!.id}',
@@ -288,7 +314,8 @@ class _MainPaneState extends State<MainPane> {
                           fileType: widget.previewFile!.type,
                           fileContent: snapshot.data ?? '',
                           filePath: widget.previewFile!.url,
-                          fileId: widget.previewFile!.id, // NEW
+                          fileId: widget.previewFile!.id,
+                          autoSummarize: shouldAutoSummarize, // now supported
                           onInteractionSuccess: widget.onAIInteractionSuccess,
                         );
                       },
@@ -317,9 +344,10 @@ class _MainPaneState extends State<MainPane> {
             ),
             const SizedBox(height: 24),
             DragDropZone(
-              label: 'Drag & drop files here\nor click to upload',
+              label: 'Drag & drop files or click to upload',
               onFilesPicked: widget.onPickFiles,
               onFilesDropped: widget.onDropFiles,
+              onFileReady: _handleFileReady, // ensure callback wired
             ),
           ],
         ),
@@ -341,12 +369,16 @@ class _MainPaneState extends State<MainPane> {
                           'Drop files here to upload to "${widget.selectedFolder!.name}"',
                       onFilesPicked: widget.onPickFiles,
                       onFilesDropped: widget.onDropFiles,
+                      onFileReady: _handleFileReady, // add here too
                     ),
                   )
                   : ListView.separated(
                     padding: const EdgeInsets.all(16),
                     itemCount: widget.files.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    separatorBuilder:
+                        (_, i) => const Divider(
+                          height: 1,
+                        ), // renamed second param to avoid lint
                     itemBuilder: (context, index) {
                       final file = widget.files[index];
                       final isSelected = file == widget.previewFile;
@@ -449,26 +481,44 @@ class _MainPaneState extends State<MainPane> {
       ],
     );
   }
-}
 
-// Helper: File type icon
-IconData _iconForFileType(String type) {
-  final t = type.toLowerCase();
-  if (t.contains('pdf')) return Icons.picture_as_pdf;
-  if (t.contains('doc') || t.contains('word')) return Icons.description;
-  if (t.contains('xls') || t.contains('sheet')) return Icons.table_chart;
-  if (t.contains('ppt')) return Icons.slideshow;
-  if (t.contains('image')) return Icons.image;
-  if (t.contains('audio')) return Icons.audiotrack;
-  if (t.contains('video')) return Icons.videocam;
-  return Icons.insert_drive_file;
-}
-
-// Helper: Format file size
-String _formatFileSize(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  if (bytes < 1024 * 1024) {
-    return '${(bytes / 1024).toStringAsFixed(1)} KB';
+  // Helper: File type icon
+  IconData _iconForFileType(String type) {
+    final t = type.toLowerCase();
+    if (t.contains('pdf')) return Icons.picture_as_pdf;
+    if (t.contains('doc') || t.contains('word')) return Icons.description;
+    if (t.contains('xls') || t.contains('sheet')) return Icons.table_chart;
+    if (t.contains('ppt')) return Icons.slideshow;
+    if (t.contains('image')) return Icons.image;
+    if (t.contains('audio')) return Icons.audiotrack;
+    if (t.contains('video')) return Icons.videocam;
+    return Icons.insert_drive_file;
   }
-  return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+
+  // Helper: Format file size
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  // REMOVE the nested PaneController class (was invalid inside this class)
+}
+
+// (Optional) If you still need PaneController, define it at top-level, outside any class:
+
+class PaneController extends ChangeNotifier {
+  bool _showFilePreview = false;
+  bool _showAIPane = false;
+
+  void openFilePreviewAndAI() {
+    _showFilePreview = true;
+    _showAIPane = true;
+    notifyListeners();
+  }
+
+  bool get showFilePreview => _showFilePreview;
+  bool get showAIPane => _showAIPane;
 }

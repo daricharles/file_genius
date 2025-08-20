@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 import '../models/chat_models.dart';
+import 'ai_service.dart';
 
 /// Intelligent question suggestions service
 class QuestionSuggestionsService {
-  static QuestionSuggestionsService? _instance;
-  static QuestionSuggestionsService get instance =>
-      _instance ??= QuestionSuggestionsService._();
-  QuestionSuggestionsService._();
+  final AIService aiService;
+
+  // Primary DI constructor
+  QuestionSuggestionsService({required this.aiService});
+
+  // Optional singleton (if some legacy code calls QuestionSuggestionsService.instance)
+  static final QuestionSuggestionsService instance = QuestionSuggestionsService(
+    aiService: AIService(),
+  );
 
   // Base question suggestions by file type
   static final Map<String, List<QuestionSuggestion>> _baseQuestions = {
@@ -694,5 +700,30 @@ class QuestionSuggestionsService {
     // This would typically update a database or analytics service
     // For now, we'll just log it (removed print for production)
     debugPrint('Question used: $questionId');
+  }
+
+  Future<List<String>> generateFollowUpQuestions({
+    required String fileName,
+    required String summary,
+    required String excerpt,
+    int count = 6,
+  }) async {
+    final prompt = '''
+File: $fileName
+Summary:
+$summary
+
+Excerpt (may be truncated):
+$excerpt
+
+Generate $count deep, non-trivial follow-up questions a learner might ask.
+One question per line. No numbering.
+''';
+    final text = await aiService.sendPrompt(prompt, maxTokens: 300);
+    return text
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
   }
 }
