@@ -119,6 +119,19 @@ class _AIChatWidgetState extends State<AIChatWidget>
     // Prevent re-entry while sending
     if (_isSending) return;
 
+    // NEW: Skip if last user message (any time ago) is identical
+    ChatMessage? lastUser;
+    for (var i = _messages.length - 1; i >= 0; i--) {
+      if (_messages[i].isUser) {
+        lastUser = _messages[i];
+        break;
+      }
+    }
+    if (lastUser != null && lastUser.text.trim() == question) {
+      debugPrint('Skipped duplicate (same as last user message): $question');
+      return;
+    }
+
     // Ignore exact duplicate within short window (2 seconds)
     final now = DateTime.now();
     if (_lastSentText != null &&

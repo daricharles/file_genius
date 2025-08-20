@@ -156,6 +156,20 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     final question = prompt ?? _questionController.text.trim();
     if (question.isEmpty || _currentSession == null) return;
 
+    // NEW: Skip if last user message text matches (prevents duplicate after navigation/refresh)
+    EnhancedChatMessage? lastUser;
+    for (var i = _currentSession!.messages.length - 1; i >= 0; i--) {
+      final m = _currentSession!.messages[i];
+      if (m.isUser) {
+        lastUser = m;
+        break;
+      }
+    }
+    if (lastUser != null && lastUser.text.trim() == question) {
+      debugPrint('Skipped duplicate (same as last user message): $question');
+      return;
+    }
+
     final now = DateTime.now();
     if (_lastSendText == question &&
         _lastSendAt != null &&

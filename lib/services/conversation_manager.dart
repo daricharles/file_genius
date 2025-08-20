@@ -25,6 +25,9 @@ class ConversationManager {
   Future<void> _loadSessions() async {
     try {
       _sessions = await _firebaseService.loadChatSessions();
+      for (final s in _sessions) {
+        _deduplicateSessionMessages(s);
+      }
       // Sort by last updated (most recent first)
       _sessions.sort((a, b) => b.lastUpdatedAt.compareTo(a.lastUpdatedAt));
     } catch (e) {
@@ -69,11 +72,10 @@ class ConversationManager {
     required String fileName,
     required String fileType,
     required String filePath,
-    String? fileId, // ADDED
     Map<String, dynamic>? fileMetadata,
+    String? fileId,
   }) async {
-    // Build session key logic (uses fileId if available)
-    keyMatcher(ChatSession s) {
+    bool keyMatcher(ChatSession s) {
       if (fileId != null && s.fileId == fileId && !s.isArchived) return true;
       return s.filePath == filePath && !s.isArchived;
     }
@@ -86,6 +88,7 @@ class ConversationManager {
     }
 
     if (existing != null) {
+      _deduplicateSessionMessages(existing);
       return existing;
     }
 
@@ -93,7 +96,7 @@ class ConversationManager {
       fileName: fileName,
       fileType: fileType,
       filePath: filePath,
-      fileId: fileId, // ADDED
+      fileId: fileId,
       fileMetadata: fileMetadata,
     );
     _sessions.insert(0, newSession);
@@ -150,25 +153,31 @@ class ConversationManager {
     required String sessionId,
     required EnhancedChatMessage message,
   }) async {
-    final sessionIndex = _sessions.indexWhere((s) => s.id == sessionId);
-    if (sessionIndex != -1) {
-      final updatedMessages = List<EnhancedChatMessage>.from(
-        _sessions[sessionIndex].messages,
-      )..add(message);
+    final idx = _sessions.indexWhere((s) => s.id == sessionId);
+    if (idx == -1) return;
+    final session = _sessions[idx];
 
-      _sessions[sessionIndex] = _sessions[sessionIndex].copyWith(
-        messages: updatedMessages,
-        lastUpdatedAt: DateTime.now(),
-      );
-
-      // Move session to top of list
-      final updatedSession = _sessions.removeAt(sessionIndex);
-      _sessions.insert(0, updatedSession);
-
-      // Save individual session to Firebase
-      await _firebaseService.saveChatSession(updatedSession);
-      await _updateAnalytics(message);
+    // Skip duplicate id
+    if (session.messages.any((m) => m.id == message.id)) {
+      debugPrint('ConversationManager: duplicate id ${message.id}, skipped');
+      return;
     }
+    // Skip consecutive identical (same author + trimmed text)
+    final last = session.messages.isNotEmpty ? session.messages.last : null;
+    if (last != null &&
+        last.isUser == message.isUser &&
+        last.text.trim() == message.text.trim()) {
+      debugPrint('ConversationManager: consecutive duplicate text skipped');
+      return;
+    }
+
+    final updated = session.copyWith(
+      messages: [...session.messages, message],
+      lastUpdatedAt: DateTime.now(),
+    );
+    _sessions[idx] = updated;
+    await _persistSession(updated);
+    await _updateAnalytics(message);
   }
 
   /// Update a specific message in a session
@@ -448,5 +457,39 @@ class ConversationManager {
   /// Export session to JSON
   String _exportToJson(ChatSession session) {
     return json.encode(session.toJson());
+  }
+
+  Future<void> _persistSession(ChatSession session) async {
+    try {
+      await _firebaseService.saveChatSession(session);
+    } catch (e) {
+      debugPrint('Error persisting session ${session.id}: $e');
+    }
+  }
+
+  void _deduplicateSessionMessages(ChatSession session) {
+    final seenIds = <String>{};
+    final cleaned = <EnhancedChatMessage>[];
+
+    for (final m in session.messages) {
+      if (m.id.isNotEmpty && !seenIds.add(m.id)) continue;
+      if (cleaned.isNotEmpty) {
+        final prev = cleaned.last;
+        if (prev.isUser == m.isUser && prev.text.trim() == m.text.trim()) {
+          continue;
+        }
+      }
+      cleaned.add(m);
+    }
+
+    if (cleaned.length != session.messages.length) {
+      debugPrint(
+        'ConversationManager: removed ${session.messages.length - cleaned.length} duplicate messages in ${session.id}',
+      );
+      session.messages
+        ..clear()
+        ..addAll(cleaned);
+      _persistSession(session);
+    }
   }
 }
