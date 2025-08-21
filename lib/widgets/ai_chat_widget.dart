@@ -1,17 +1,20 @@
+// Cleaned: removed welcome message + role/doc/format selections + broken fragments.
+
 // ignore_for_file: deprecated_member_use
 
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter/services.dart';
+
 import '../services/ai_service.dart';
 
 class AIChatWidget extends StatefulWidget {
   final String fileName;
   final String fileType;
   final String fileContent;
-  final String? fileId; // NEW (pass from parent for stable per-file session)
+  final String? fileId;
   final VoidCallback? onInteractionSuccess;
-  final bool autoSummarize; // NEW
+  final bool autoSummarize;
 
   const AIChatWidget({
     super.key,
@@ -20,7 +23,7 @@ class AIChatWidget extends StatefulWidget {
     required this.fileContent,
     this.fileId,
     this.onInteractionSuccess,
-    this.autoSummarize = false, // NEW
+    this.autoSummarize = false,
   });
 
   @override
@@ -33,87 +36,40 @@ class _AIChatWidgetState extends State<AIChatWidget>
   final ScrollController _scrollController = ScrollController();
   final AIService _aiService = AIService();
 
-  // In‑memory per-file message cache (simple; could swap to ConversationManager)
+  // Simple in‑memory per file session cache
   static final Map<String, List<ChatMessage>> _sessionMessages = {};
-  static final Set<String> _welcomeInjected = {};
 
   late final String _sessionKey;
 
-  // Replaces ambiguous _isLoading for send lifecycle control
   bool _isSending = false;
   bool _aiTyping = false;
   String? _errorMessage;
 
-  // Debounce / duplicate suppression
   String? _lastSentText;
   DateTime? _lastSentAt;
 
-  // Quick prompt suggestions
-  final List<String> _quickPrompts = [
+  final List<String> _quickPrompts = const [
     "Summarize this file",
     "List the main points",
     "What is this about?",
   ];
 
-  final List<String> _roles = ['Student', 'Researcher', 'Teacher', 'Other'];
-  final List<String> _docTypes = [
-    'Notes',
-    'Lecture Slides',
-    'Exam Prep',
-    'Other',
-  ];
-  final List<String> _formats = [
-    'Bullet Points',
-    'Numbered List',
-    'Paragraph',
-    'Other',
-  ];
+  late List<ChatMessage> _messages;
 
-  String? _selectedRole;
-  String? _selectedDocType;
-  String? _selectedFormat;
-
-  // Replace the original initialization of _messages:
-  late List<ChatMessage>
-  _messages; // (was final List<ChatMessage> _messages = [])
-
-  bool _summaryRequested = false; // NEW
-  List<String> _dynamicFollowUps = []; // NEW
+  bool _summaryRequested = false;
+  List<String> _dynamicFollowUps = [];
 
   @override
   void initState() {
     super.initState();
     _sessionKey = widget.fileId ?? '${widget.fileName}_${widget.fileType}';
-
-    // Reuse existing messages if present; else create list
-    if (_sessionMessages[_sessionKey] == null) {
-      _sessionMessages[_sessionKey] = <ChatMessage>[];
-    }
+    _sessionMessages.putIfAbsent(_sessionKey, () => <ChatMessage>[]);
     _messages = _sessionMessages[_sessionKey]!;
 
-    // Inject welcome only once per session key
-    if (!_welcomeInjected.contains(_sessionKey)) {
-      _addWelcomeMessage();
-      _welcomeInjected.add(_sessionKey);
-    }
-
-    // Trigger auto summary only once per session & if requested
     if (widget.autoSummarize && !_summaryRequested) {
       _summaryRequested = true;
-      // Delay to allow first frame
       WidgetsBinding.instance.addPostFrameCallback((_) => _runAutoSummary());
     }
-  }
-
-  void _addWelcomeMessage() {
-    _messages.add(
-      ChatMessage(
-        text:
-            'Hello! I\'m FileGenius AI. I can help you analyze "${widget.fileName}". Ask anything when ready.',
-        isUser: false,
-        timestamp: DateTime.now(),
-      ),
-    );
   }
 
   @override
@@ -123,36 +79,63 @@ class _AIChatWidgetState extends State<AIChatWidget>
     super.dispose();
   }
 
+  Future<void> _runAutoSummary() async {
+    if (widget.fileContent.trim().isEmpty) return;
+    setState(() {
+      _aiTyping = true;
+    });
+    final res = await _aiService.summarizeFile(
+      fileName: widget.fileName,
+      fileType: widget.fileType,
+      fileContent: widget.fileContent,
+    );
+    if (!mounted) return;
+    setState(() {
+      _aiTyping = false;
+      if (res.success) {
+        final summary = res.data?['summary'] ?? 'No summary returned.';
+        _messages.add(ChatMessage(
+          text: '**Auto Summary**\n\n$summary',
+          isUser: false,
+          timestamp: DateTime.now(),
+        ));
+        _dynamicFollowUps =
+            (res.data?['follow_ups'] as List?)?.cast<String>() ?? [];
+      } else {
+        _messages.add(ChatMessage(
+          text:
+              'Failed to auto-summarize this file. You can still ask questions.\n\nError: ${res.message}',
+          isUser: false,
+          timestamp: DateTime.now(),
+        ));
+      }
+    });
+    _scrollToBottom();
+  }
+
   Future<void> _sendMessage({String? prompt}) async {
     final raw = prompt ?? _questionController.text;
     final question = raw.trim();
     if (question.isEmpty) return;
-
-    // Prevent re-entry while sending
     if (_isSending) return;
 
-    // NEW: Skip if last user message (any time ago) is identical
-    ChatMessage? lastUser;
-    for (var i = _messages.length - 1; i >= 0; i--) {
-      if (_messages[i].isUser) {
-        lastUser = _messages[i];
-        break;
-      }
-    }
-    if (lastUser != null && lastUser.text.trim() == question) {
-      debugPrint('Skipped duplicate (same as last user message): $question');
-      return;
-    }
-
-    // Ignore exact duplicate within short window (2 seconds)
+    // Prevent identical immediate resend
     final now = DateTime.now();
     if (_lastSentText != null &&
         _lastSentText == question &&
         _lastSentAt != null &&
         now.difference(_lastSentAt!) < const Duration(seconds: 2)) {
-      debugPrint('Skipped duplicate prompt: $question');
       return;
     }
+
+    // Prevent same as last user message anytime
+    for (var i = _messages.length - 1; i >= 0; i--) {
+      if (_messages[i].isUser) {
+        if (_messages[i].text.trim() == question) return;
+        break;
+      }
+    }
+
     _lastSentText = question;
     _lastSentAt = now;
 
@@ -160,9 +143,11 @@ class _AIChatWidgetState extends State<AIChatWidget>
       _isSending = true;
       _aiTyping = true;
       _errorMessage = null;
-      _messages.add(
-        ChatMessage(text: question, isUser: true, timestamp: DateTime.now()),
-      );
+      _messages.add(ChatMessage(
+        text: question,
+        isUser: true,
+        timestamp: DateTime.now(),
+      ));
     });
 
     _questionController.clear();
@@ -174,23 +159,16 @@ class _AIChatWidgetState extends State<AIChatWidget>
         fileType: widget.fileType,
         fileContent: widget.fileContent,
         question: question,
-        userRole: _selectedRole,
-        docType: _selectedDocType,
-        preferredFormat: _selectedFormat,
       );
-
       if (!mounted) return;
-
       if (response.success) {
         setState(() {
           _aiTyping = false;
-          _messages.add(
-            ChatMessage(
-              text: response.data!['answer'],
-              isUser: false,
-              timestamp: DateTime.now(),
-            ),
-          );
+          _messages.add(ChatMessage(
+            text: response.data!['answer'],
+            isUser: false,
+            timestamp: DateTime.now(),
+          ));
         });
         widget.onInteractionSuccess?.call();
       } else {
@@ -198,14 +176,12 @@ class _AIChatWidgetState extends State<AIChatWidget>
           _aiTyping = false;
           _errorMessage = response.message;
           if (response.message.contains('Rate limit')) {
-            _messages.add(
-              ChatMessage(
-                text:
-                    '⚠️ **Rate Limit Reached**\n\n${response.message}\n\n**Suggestions:**\n• Wait and retry\n• Check usage dashboard\n• Shorten the question\n• Consider upgrading your plan',
-                isUser: false,
-                timestamp: DateTime.now(),
-              ),
-            );
+            _messages.add(ChatMessage(
+              text:
+                  '⚠️ **Rate Limit Reached**\n\n${response.message}\n\n**Suggestions:**\n• Wait and retry\n• Check usage dashboard\n• Shorten the question\n• Consider upgrading your plan',
+              isUser: false,
+              timestamp: DateTime.now(),
+            ));
           }
         });
       }
@@ -225,64 +201,64 @@ class _AIChatWidgetState extends State<AIChatWidget>
     }
   }
 
-  Future<void> _runAutoSummary() async {
-    setState(() {
-      _aiTyping = true;
-    });
-    final res = await _aiService.summarizeFile(
-      fileName: widget.fileName,
-      fileType: widget.fileType,
-      fileContent: widget.fileContent,
-      userRole: _selectedRole,
-      docType: _selectedDocType,
-      preferredFormat: _selectedFormat,
-    );
-    if (!mounted) return;
-    setState(() {
-      _aiTyping = false;
-      if (res.success) {
-        final summary = res.data?['summary'] ?? 'No summary returned.';
-        _messages.add(
-          ChatMessage(
-            text: '**Auto Summary**\n\n$summary',
-            isUser: false,
-            timestamp: DateTime.now(),
-          ),
-        );
-        _dynamicFollowUps =
-            (res.data?['follow_ups'] as List?)?.cast<String>() ?? [];
-      } else {
-        _messages.add(
-          ChatMessage(
-            text:
-                'Failed to auto-summarize this file. You can still ask questions.\n\nError: ${res.message}',
-            isUser: false,
-            timestamp: DateTime.now(),
-          ),
-        );
-      }
-    });
-    _scrollToBottom();
-  }
-
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
     });
+  }
+
+  Widget _buildChips() {
+    final chips = <Widget>[
+      ..._quickPrompts.map(
+        (p) => ActionChip(
+          label: Text(p),
+            onPressed: _isSending ? null : () => _sendMessage(prompt: p),
+          backgroundColor: Theme.of(context).primaryColor.withOpacity(0.12),
+          labelStyle: TextStyle(
+            color: Theme.of(context).primaryColor,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ),
+    ];
+    if (_dynamicFollowUps.isNotEmpty) {
+      chips.add(const Padding(
+        padding: EdgeInsets.only(left: 4),
+        child: Text(
+          'Follow-ups:',
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+        ),
+      ));
+      chips.addAll(_dynamicFollowUps.map(
+        (q) => InputChip(
+          label: Text(q),
+          onPressed: _isSending ? null : () => _sendMessage(prompt: q),
+          tooltip: 'Ask follow-up',
+        ),
+      ));
+    }
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: chips,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // needed for AutomaticKeepAliveClientMixin
+    super.build(context);
     return Column(
       children: [
-        // Header with quick actions and menu
+        // Header
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -296,262 +272,80 @@ class _AIChatWidgetState extends State<AIChatWidget>
           ),
           child: Row(
             children: [
-              Icon(
-                Icons.psychology,
-                color: Theme.of(context).primaryColor,
-                size: 24,
-              ),
+              Icon(Icons.psychology,
+                  color: Theme.of(context).primaryColor, size: 24),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'AI Assistant - ${widget.fileName}',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
                 ),
               ),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert),
-                tooltip: 'More actions',
-                itemBuilder:
-                    (context) => [
-                      PopupMenuItem(
-                        value: 'clear',
-                        child: Row(
-                          children: const [
-                            Icon(Icons.clear_all, size: 18),
-                            SizedBox(width: 8),
-                            Text('Clear chat'),
-                          ],
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'export',
-                        child: Row(
-                          children: const [
-                            Icon(Icons.download, size: 18),
-                            SizedBox(width: 8),
-                            Text('Export chat'),
-                          ],
-                        ),
-                      ),
-                    ],
-                onSelected: (value) {
-                  if (value == 'clear') {
+                itemBuilder: (c) => [
+                  const PopupMenuItem(
+                    value: 'clear',
+                    child: Row(
+                      children: [
+                        Icon(Icons.clear_all, size: 18),
+                        SizedBox(width: 8),
+                        Text('Clear chat'),
+                      ],
+                    ),
+                  ),
+                ],
+                onSelected: (v) {
+                  if (v == 'clear') {
                     setState(() {
                       _messages.clear();
-                      _welcomeInjected.remove(_sessionKey);
-                      _addWelcomeMessage();
+                      _dynamicFollowUps.clear();
                     });
                   }
-                  // Implement export if needed
                 },
               ),
             ],
           ),
         ),
 
-        // Quick prompt chips
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              // Original static prompts
-              ..._quickPrompts.map((prompt) {
-                return ActionChip(
-                  label: Text(prompt),
-                  onPressed:
-                      _isSending ? null : () => _sendMessage(prompt: prompt),
-                  backgroundColor: Theme.of(
-                    context,
-                  ).primaryColor.withOpacity(0.12),
-                  labelStyle: TextStyle(
-                    color: Theme.of(context).primaryColor,
-                    fontWeight: FontWeight.w500,
-                  ),
-                );
-              }),
-              if (_dynamicFollowUps.isNotEmpty)
-                const Padding(
-                  padding: EdgeInsets.only(left: 4),
-                  child: Text(
-                    'Follow-ups:',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              // Dynamic follow-up chips
-              ..._dynamicFollowUps.map((q) {
-                return InputChip(
-                  label: Text(q),
-                  onPressed: _isSending ? null : () => _sendMessage(prompt: q),
-                  tooltip: 'Ask this follow-up',
-                );
-              }),
-            ],
-          ),
-        ),
+        _buildChips(),
 
-        // Role, Doc Type, and Format selection
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              // If the pane is less than 500px wide, stack vertically
-              if (constraints.maxWidth < 500) {
-                return Column(
-                  children: [
-                    DropdownButtonFormField<String>(
-                      value: _selectedRole,
-                      hint: const Text('Role'),
-                      items:
-                          _roles
-                              .map(
-                                (role) => DropdownMenuItem(
-                                  value: role,
-                                  child: Text(role),
-                                ),
-                              )
-                              .toList(),
-                      onChanged: (val) => setState(() => _selectedRole = val),
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      value: _selectedDocType,
-                      hint: const Text('Doc Type'),
-                      items:
-                          _docTypes
-                              .map(
-                                (type) => DropdownMenuItem(
-                                  value: type,
-                                  child: Text(type),
-                                ),
-                              )
-                              .toList(),
-                      onChanged:
-                          (val) => setState(() => _selectedDocType = val),
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<String>(
-                      value: _selectedFormat,
-                      hint: const Text('Format'),
-                      items:
-                          _formats
-                              .map(
-                                (fmt) => DropdownMenuItem(
-                                  value: fmt,
-                                  child: Text(fmt),
-                                ),
-                              )
-                              .toList(),
-                      onChanged: (val) => setState(() => _selectedFormat = val),
-                    ),
-                  ],
-                );
-              } else {
-                // Wide: show in a row
-                return Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: _selectedRole,
-                        hint: const Text('Role'),
-                        items:
-                            _roles
-                                .map(
-                                  (role) => DropdownMenuItem(
-                                    value: role,
-                                    child: Text(role),
-                                  ),
-                                )
-                                .toList(),
-                        onChanged: (val) => setState(() => _selectedRole = val),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: _selectedDocType,
-                        hint: const Text('Doc Type'),
-                        items:
-                            _docTypes
-                                .map(
-                                  (type) => DropdownMenuItem(
-                                    value: type,
-                                    child: Text(type),
-                                  ),
-                                )
-                                .toList(),
-                        onChanged:
-                            (val) => setState(() => _selectedDocType = val),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: _selectedFormat,
-                        hint: const Text('Format'),
-                        items:
-                            _formats
-                                .map(
-                                  (fmt) => DropdownMenuItem(
-                                    value: fmt,
-                                    child: Text(fmt),
-                                  ),
-                                )
-                                .toList(),
-                        onChanged:
-                            (val) => setState(() => _selectedFormat = val),
-                      ),
-                    ),
-                  ],
-                );
-              }
-            },
-          ),
-        ),
-
-        // Chat messages
+        // Messages
         Expanded(
-          child:
-              _messages.isEmpty
-                  ? const Center(
-                    child: Text(
-                      'Start a conversation with AI about your file!',
-                    ),
-                  )
-                  : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _messages.length + (_aiTyping ? 1 : 0),
-                    itemBuilder: (context, index) {
-                      if (index == _messages.length && _aiTyping) {
-                        return const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 8),
-                          child: Row(
-                            children: [
-                              SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              ),
-                              SizedBox(width: 16),
-                              Text('AI is typing...'),
-                            ],
-                          ),
-                        );
-                      }
-                      final message = _messages[index];
-                      return ChatMessageWidget(message: message);
-                    },
-                  ),
+          child: _messages.isEmpty
+              ? const Center(
+                  child: Text('Start a conversation about your file.'),
+                )
+              : ListView.builder(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _messages.length + (_aiTyping ? 1 : 0),
+                  itemBuilder: (context, index) {
+                    if (index == _messages.length && _aiTyping) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                            SizedBox(width: 16),
+                            Text('AI is typing...'),
+                          ],
+                        ),
+                      );
+                    }
+                    final msg = _messages[index];
+                    return ChatMessageWidget(message: msg);
+                  },
+                ),
         ),
 
-        // Error message
         if (_errorMessage != null)
           Container(
             width: double.infinity,
@@ -564,7 +358,8 @@ class _AIChatWidgetState extends State<AIChatWidget>
             ),
             child: Row(
               children: [
-                Icon(Icons.error_outline, color: Colors.red.shade600, size: 20),
+                Icon(Icons.error_outline,
+                    color: Colors.red.shade600, size: 20),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -582,34 +377,30 @@ class _AIChatWidgetState extends State<AIChatWidget>
             ),
           ),
 
-        // Input area
+        // Input
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: Theme.of(context).scaffoldBackgroundColor,
             border: Border(
-              top: BorderSide(color: Theme.of(context).dividerColor, width: 1),
+              top: BorderSide(color: Theme.of(context).dividerColor),
             ),
           ),
           child: Row(
             children: [
               Expanded(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxHeight: 120,
-                    minHeight: 48,
-                  ),
+                  constraints:
+                      const BoxConstraints(maxHeight: 120, minHeight: 48),
                   child: TextField(
                     controller: _questionController,
                     decoration: InputDecoration(
-                      hintText: 'Ask a question about ${widget.fileName}...',
+                      hintText: 'Ask about ${widget.fileName}...',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(24),
                       ),
                       contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
+                          horizontal: 16, vertical: 12),
                     ),
                     minLines: 1,
                     maxLines: 4,
@@ -628,25 +419,23 @@ class _AIChatWidgetState extends State<AIChatWidget>
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
-                    color:
-                        _isSending
-                            ? Colors.grey
-                            : Theme.of(context).primaryColor,
+                    color: _isSending
+                        ? Colors.grey
+                        : Theme.of(context).primaryColor,
                     borderRadius: BorderRadius.circular(24),
                   ),
                   child: IconButton(
                     onPressed: _isSending ? null : _sendMessage,
-                    icon:
-                        _isSending
-                            ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2,
-                              ),
-                            )
-                            : const Icon(Icons.send, color: Colors.white),
+                    icon: _isSending
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Icon(Icons.send, color: Colors.white),
                   ),
                 ),
               ),
@@ -680,47 +469,38 @@ class ChatMessageWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isUser = message.isUser;
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (!message.isUser) ...[
+          if (!isUser) ...[
             CircleAvatar(
               radius: 16,
               backgroundColor: Theme.of(context).primaryColor,
-              child: const Icon(
-                Icons.psychology,
-                color: Colors.white,
-                size: 16,
-              ),
+              child: const Icon(Icons.psychology, color: Colors.white, size: 16),
             ),
             const SizedBox(width: 8),
           ],
           Expanded(
             child: Column(
               crossAxisAlignment:
-                  message.isUser
-                      ? CrossAxisAlignment.end
-                      : CrossAxisAlignment.start,
+                  isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
               children: [
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color:
-                        message.isUser
-                            ? Theme.of(context).primaryColor
-                            : Theme.of(context).cardColor,
+                    color: isUser
+                        ? Theme.of(context).primaryColor
+                        : Theme.of(context).cardColor,
                     borderRadius: BorderRadius.circular(12),
-                    border:
-                        message.isUser
-                            ? null
-                            : Border.all(
-                              color: Theme.of(context).dividerColor,
-                              width: 1,
-                            ),
+                    border: isUser
+                        ? null
+                        : Border.all(
+                            color: Theme.of(context).dividerColor, width: 1),
                     boxShadow: [
-                      if (!message.isUser)
+                      if (!isUser)
                         BoxShadow(
                           color: Colors.black.withOpacity(0.04),
                           blurRadius: 4,
@@ -731,20 +511,18 @@ class ChatMessageWidget extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (!message.isUser)
+                      if (!isUser)
                         Row(
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
                             IconButton(
                               onPressed: () {
                                 Clipboard.setData(
-                                  ClipboardData(text: message.text),
-                                );
+                                    ClipboardData(text: message.text));
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
-                                    content: Text(
-                                      'Response copied to clipboard',
-                                    ),
+                                    content:
+                                        Text('Response copied to clipboard'),
                                     duration: Duration(seconds: 2),
                                   ),
                                 );
@@ -756,19 +534,21 @@ class ChatMessageWidget extends StatelessWidget {
                             ),
                           ],
                         ),
-                      message.isUser
+                      isUser
                           ? Text(
-                            message.text,
-                            style: const TextStyle(color: Colors.white),
-                          )
+                              message.text,
+                              style: const TextStyle(color: Colors.white),
+                            )
                           : MarkdownBody(
-                            data: message.text,
-                            styleSheet: MarkdownStyleSheet(
-                              p: Theme.of(context).textTheme.bodyMedium,
-                              strong: Theme.of(context).textTheme.bodyMedium
-                                  ?.copyWith(fontWeight: FontWeight.bold),
+                              data: message.text,
+                              styleSheet: MarkdownStyleSheet(
+                                p: Theme.of(context).textTheme.bodyMedium,
+                                strong: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(fontWeight: FontWeight.bold),
+                              ),
                             ),
-                          ),
                     ],
                   ),
                 ),
@@ -776,24 +556,23 @@ class ChatMessageWidget extends StatelessWidget {
                 Text(
                   _formatTime(message.timestamp),
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(
-                      context,
-                    ).textTheme.bodySmall?.color?.withOpacity(0.6),
-                  ),
+                        color: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.color
+                            ?.withOpacity(0.6),
+                      ),
                 ),
               ],
             ),
           ),
-          if (message.isUser) ...[
+          if (isUser) ...[
             const SizedBox(width: 8),
             CircleAvatar(
               radius: 16,
               backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
-              child: Icon(
-                Icons.person,
-                color: Theme.of(context).primaryColor,
-                size: 16,
-              ),
+              child: Icon(Icons.person,
+                  color: Theme.of(context).primaryColor, size: 16),
             ),
           ],
         ],
@@ -801,7 +580,6 @@ class ChatMessageWidget extends StatelessWidget {
     );
   }
 
-  String _formatTime(DateTime timestamp) {
-    return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
-  }
+  String _formatTime(DateTime ts) =>
+      '${ts.hour.toString().padLeft(2, '0')}:${ts.minute.toString().padLeft(2, '0')}';
 }

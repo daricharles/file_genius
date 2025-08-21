@@ -41,7 +41,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     with SingleTickerProviderStateMixin {
   final TextEditingController _questionController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final AIService _aiService = AIService(); // ensure available
+  final AIService _aiService = AIService();
   final ConversationManager _conversationManager = ConversationManager.instance;
   final Uuid _uuid = const Uuid();
   final SpeechService _speechService = SpeechService();
@@ -52,39 +52,13 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   bool _aiTyping = false;
   bool _isSpeechServiceInitialized = false;
   bool _aiBusy = false;
-  bool _autoSummaryRun = false; // NEW
-
-  String? _selectedRole;
-  String? _selectedDocType;
-  String? _selectedFormat;
+  bool _autoSummaryRun = false;
 
   DateTime? _lastSendAt;
   String? _lastSendText;
 
   late AnimationController _typingAnimationController;
   late Animation<double> _typingAnimation;
-
-  final List<String> _roles = [
-    'Student',
-    'Researcher',
-    'Teacher',
-    'Professional',
-    'Other',
-  ];
-  final List<String> _docTypes = [
-    'Notes',
-    'Lecture Slides',
-    'Research Paper',
-    'Report',
-    'Other',
-  ];
-  final List<String> _formats = [
-    'Bullet Points',
-    'Numbered List',
-    'Paragraph',
-    'Table',
-    'Other',
-  ];
 
   List<String> _followUps = []; // NEW
 
@@ -182,10 +156,34 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
         fileType: widget.fileType,
         filePath: widget.filePath,
         fileMetadata: widget.fileMetadata,
-        fileId: widget.fileId, // add if method signature allows
+        fileId: widget.fileId,
       );
+
+      // REMOVE any auto‑inserted greeting so only the summary (autoSummarize) appears
+      if (_currentSession != null &&
+          _currentSession!.messages.length == 1 &&
+          !_currentSession!.messages.first.isUser) {
+        final first = _currentSession!.messages.first.text;
+        if (first.startsWith("Hello! I'm FileGenius AI")) {
+          _currentSession!.messages.clear();
+        }
+      }
+
       if (!mounted) return;
       setState(() => _isInitializing = false);
+
+      // If autoSummarize is enabled and no summary yet, run it
+      if (widget.autoSummarize &&
+          !_autoSummaryRun &&
+          (_currentSession!.messages.isEmpty ||
+              !_currentSession!.messages.any(
+                (m) =>
+                    (m.messageType == 'summary') ||
+                    m.text.startsWith('**Summary**'),
+              ))) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _runAutoSummary());
+      }
+
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _scrollToBottom(isInitialScroll: true);
       });
@@ -256,14 +254,13 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     try {
       _conversationManager.getConversationContext(_currentSession!.id);
 
+      // UPDATED: removed role/doc/format parameters
       final response = await _aiService.askQuestion(
         fileName: widget.fileName,
         fileType: widget.fileType,
         fileContent: widget.fileContent,
         question: question,
-        userRole: _selectedRole,
-        docType: _selectedDocType,
-        preferredFormat: _selectedFormat,
+        // userRole: null, docType: null, preferredFormat: null  // <- if still required as named params keep nulls
       );
 
       _typingAnimationController.stop();
@@ -311,7 +308,21 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       if (_typingAnimationController.isAnimating) {
         _typingAnimationController.stop();
       }
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _aiTyping = false;
+        });
+      }
     }
+  }
+
+  Future<void> _sendUserPrompt(String prompt) async {
+    if (prompt.trim().isEmpty) return;
+
+    // Set the prompt in the text field and send it
+    _questionController.text = prompt;
+    await _sendMessage(prompt: prompt);
   }
 
   Future<void> _showErrorMessage(String message) async {
@@ -436,32 +447,11 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     return Column(
       children: [
         _buildHeader(),
-        _buildRoleSelections(),
         Expanded(child: _buildMessageList()),
         if (_aiTyping) _buildTypingIndicator(),
         _buildInputArea(),
-        if (_followUps.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              children:
-                  _followUps.map((q) {
-                    return ActionChip(
-                      label: Text(q),
-                      onPressed: _aiBusy ? null : () => _sendUserPrompt(q),
-                    );
-                  }).toList(),
-            ),
-          ),
       ],
     );
-  }
-
-  void _sendUserPrompt(String prompt) {
-    // reuse existing send logic
-    _sendMessage(prompt: prompt);
   }
 
   Widget _buildHeader() {
@@ -596,383 +586,6 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     );
   }
 
-  Widget _buildRoleSelections() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final role = _buildDropdown(
-            'Role',
-            _selectedRole,
-            _roles,
-            (v) => setState(() => _selectedRole = v),
-          );
-          final doc = _buildDropdown(
-            'Doc Type',
-            _selectedDocType,
-            _docTypes,
-            (v) => setState(() => _selectedDocType = v),
-          );
-          final fmt = _buildDropdown(
-            'Format',
-            _selectedFormat,
-            _formats,
-            (v) => setState(() => _selectedFormat = v),
-          );
-          if (constraints.maxWidth < 500) {
-            return Column(
-              children: [
-                role,
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(child: doc),
-                    const SizedBox(width: 8),
-                    Expanded(child: fmt),
-                  ],
-                ),
-              ],
-            );
-          }
-          return Row(
-            children: [
-              Expanded(child: role),
-              const SizedBox(width: 8),
-              Expanded(child: doc),
-              const SizedBox(width: 8),
-              Expanded(child: fmt),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildDropdown(
-    String hint,
-    String? value,
-    List<String> items,
-    ValueChanged<String?> onChanged,
-  ) {
-    return DropdownButtonFormField<String>(
-      value: value,
-      hint: Text(hint, style: const TextStyle(fontSize: 12)),
-      items:
-          items
-              .map(
-                (e) => DropdownMenuItem(
-                  value: e,
-                  child: Text(e, style: const TextStyle(fontSize: 12)),
-                ),
-              )
-              .toList(),
-      onChanged: onChanged,
-      decoration: InputDecoration(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Colors.grey[300]!),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: Theme.of(context).primaryColor),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMessageList() {
-    if (_currentSession!.messages.isEmpty) {
-      return const Center(child: Text('Start a conversation!'));
-    }
-    return ListView.builder(
-      controller: _scrollController,
-      padding: const EdgeInsets.all(16),
-      itemCount: _currentSession!.messages.length,
-      itemBuilder:
-          (context, i) => _buildMessageWidget(_currentSession!.messages[i]),
-    );
-  }
-
-  Widget _buildMessageWidget(EnhancedChatMessage message) {
-    final isUser = message.isUser;
-    final isError = message.metadata?['isError'] == true;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (!isUser) ...[
-            CircleAvatar(
-              radius: 16,
-              backgroundColor:
-                  isError
-                      ? Colors.red[100]
-                      : Theme.of(context).primaryColor.withOpacity(0.1),
-              child: Icon(
-                isError ? Icons.error : Icons.psychology,
-                color:
-                    isError ? Colors.red[600] : Theme.of(context).primaryColor,
-                size: 16,
-              ),
-            ),
-            const SizedBox(width: 8),
-          ],
-          Expanded(
-            child: Column(
-              crossAxisAlignment:
-                  isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color:
-                        isUser
-                            ? Theme.of(context).primaryColor
-                            : isError
-                            ? Colors.red[50]
-                            : Colors.grey[100],
-                    borderRadius: BorderRadius.circular(12).copyWith(
-                      topLeft:
-                          isUser
-                              ? const Radius.circular(12)
-                              : const Radius.circular(4),
-                      topRight:
-                          isUser
-                              ? const Radius.circular(4)
-                              : const Radius.circular(12),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (message.messageType != null &&
-                          message.messageType != 'question' &&
-                          message.messageType != 'response')
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 8),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                _getMessageTypeIcon(message.messageType!),
-                                size: 12,
-                                color:
-                                    isUser ? Colors.white70 : Colors.grey[600],
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                message.messageType!.toUpperCase(),
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
-                                  color:
-                                      isUser
-                                          ? Colors.white70
-                                          : Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      isUser
-                          ? Text(
-                            message.text,
-                            style: const TextStyle(color: Colors.white),
-                          )
-                          : MarkdownBody(
-                            data: message.text,
-                            styleSheet: MarkdownStyleSheet(
-                              p: Theme.of(context).textTheme.bodyMedium,
-                              strong: Theme.of(context).textTheme.bodyMedium
-                                  ?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                      if (!isUser && !isError)
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Spacer(),
-                            IconButton(
-                              onPressed: () => _bookmarkMessage(message.id),
-                              icon: Icon(
-                                message.isBookmarked
-                                    ? Icons.bookmark
-                                    : Icons.bookmark_border,
-                                size: 16,
-                                color:
-                                    message.isBookmarked
-                                        ? Colors.amber
-                                        : Colors.grey[600],
-                              ),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              tooltip:
-                                  message.isBookmarked
-                                      ? 'Remove bookmark'
-                                      : 'Bookmark',
-                            ),
-                            const SizedBox(width: 4),
-                            IconButton(
-                              onPressed: () {
-                                Clipboard.setData(
-                                  ClipboardData(text: message.text),
-                                );
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Copied')),
-                                );
-                              },
-                              icon: const Icon(Icons.copy, size: 16),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              tooltip: 'Copy',
-                            ),
-                            const SizedBox(width: 4),
-                            if (_isSpeechServiceInitialized)
-                              ListenableBuilder(
-                                listenable: _speechService,
-                                builder:
-                                    (_, _) => IconButton(
-                                      icon: Icon(
-                                        _speechService.isSpeaking &&
-                                                !_speechService.isPaused
-                                            ? Icons.volume_up
-                                            : _speechService.isPaused
-                                            ? Icons.pause
-                                            : Icons.volume_off,
-                                        size: 16,
-                                        color: Colors.grey[600],
-                                      ),
-                                      onPressed: () {
-                                        if (_speechService.isSpeaking) {
-                                          _speechService.isPaused
-                                              ? _speechService.speak(
-                                                message.text,
-                                              )
-                                              : _speechService.pause();
-                                        } else {
-                                          _speechService.speak(message.text);
-                                        }
-                                      },
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(),
-                                      tooltip: 'Read aloud',
-                                    ),
-                              ),
-                            if (_isSpeechServiceInitialized)
-                              ListenableBuilder(
-                                listenable: _speechService,
-                                builder:
-                                    (_, _) =>
-                                        _speechService.isSpeaking
-                                            ? IconButton(
-                                              icon: Icon(
-                                                Icons.stop,
-                                                size: 16,
-                                                color: Colors.grey[600],
-                                              ),
-                                              onPressed: _speechService.stop,
-                                              padding: EdgeInsets.zero,
-                                              constraints:
-                                                  const BoxConstraints(),
-                                              tooltip: 'Stop',
-                                            )
-                                            : const SizedBox.shrink(),
-                              ),
-                          ],
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisAlignment:
-                      isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
-                  children: [
-                    Text(
-                      _formatTime(message.timestamp),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(
-                          context,
-                        ).textTheme.bodySmall?.color?.withOpacity(0.6),
-                      ),
-                    ),
-                    if (message.isBookmarked) ...[
-                      const SizedBox(width: 4),
-                      Icon(Icons.bookmark, size: 12, color: Colors.amber[600]),
-                    ],
-                  ],
-                ),
-              ],
-            ),
-          ),
-          if (isUser) ...[
-            const SizedBox(width: 8),
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
-              child: Icon(
-                Icons.person,
-                color: Theme.of(context).primaryColor,
-                size: 16,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTypingIndicator() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 12,
-            backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
-            child: Icon(
-              Icons.psychology,
-              color: Theme.of(context).primaryColor,
-              size: 12,
-            ),
-          ),
-          const SizedBox(width: 8),
-          AnimatedBuilder(
-            animation: _typingAnimation,
-            builder:
-                (context, _) => Row(
-                  children: List.generate(3, (i) {
-                    final opacity =
-                        0.3 +
-                        (0.7 * (((_typingAnimation.value + i * 0.3) % 1.0)));
-                    return Container(
-                      width: 6,
-                      height: 6,
-                      margin: const EdgeInsets.symmetric(horizontal: 2),
-                      decoration: BoxDecoration(
-                        color: Theme.of(
-                          context,
-                        ).primaryColor.withOpacity(opacity),
-                        shape: BoxShape.circle,
-                      ),
-                    );
-                  }),
-                ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            'AI is thinking...',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: Theme.of(context).primaryColor,
-              fontStyle: FontStyle.italic,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildInputArea() {
     return Container(
       padding: const EdgeInsets.all(8),
@@ -1074,6 +687,276 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                   _isLoading
                       ? Colors.grey.withOpacity(0.1)
                       : Theme.of(context).primaryColor.withOpacity(0.1),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMessageList() {
+    if (_currentSession!.messages.isEmpty) {
+      return const Center(child: Text('Start a conversation!'));
+    }
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.all(16),
+      itemCount: _currentSession!.messages.length,
+      itemBuilder:
+          (context, i) => _buildMessageWidget(_currentSession!.messages[i]),
+    );
+  }
+
+  Widget _buildMessageWidget(EnhancedChatMessage message) {
+    final isUser = message.isUser;
+    final isError = message.metadata?['isError'] == true;
+    final isSummary = message.messageType == 'summary';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!isUser) ...[
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+              child: Icon(
+                _getMessageTypeIcon(message.messageType ?? 'chat'),
+                color: Theme.of(context).primaryColor,
+                size: 16,
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment:
+                  isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color:
+                        isUser
+                            ? Theme.of(context).primaryColor
+                            : isError
+                            ? Colors.red.shade50
+                            : Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border:
+                        isError ? Border.all(color: Colors.red.shade200) : null,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      isUser
+                          ? Text(
+                            message.text,
+                            style: const TextStyle(color: Colors.white),
+                          )
+                          : MarkdownBody(
+                            data: message.text,
+                            styleSheet: MarkdownStyleSheet(
+                              p: Theme.of(context).textTheme.bodyMedium,
+                              strong: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(fontWeight: FontWeight.bold),
+                            ),
+                          ),
+
+                      // Show follow-ups for summary messages
+                      if (isSummary && _followUps.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        const Divider(),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Follow-up Questions:',
+                          style: Theme.of(
+                            context,
+                          ).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context).primaryColor,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children:
+                              _followUps.map((question) {
+                                return ActionChip(
+                                  label: Text(
+                                    question,
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                  onPressed:
+                                      _aiBusy
+                                          ? null
+                                          : () => _sendUserPrompt(question),
+                                  backgroundColor: Theme.of(
+                                    context,
+                                  ).primaryColor.withOpacity(0.1),
+                                  labelStyle: TextStyle(
+                                    color: Theme.of(context).primaryColor,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  side: BorderSide(
+                                    color: Theme.of(
+                                      context,
+                                    ).primaryColor.withOpacity(0.3),
+                                  ),
+                                );
+                              }).toList(),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                if (!isUser && !isError)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Spacer(),
+                      IconButton(
+                        onPressed: () => _bookmarkMessage(message.id),
+                        icon: Icon(
+                          message.isBookmarked
+                              ? Icons.bookmark
+                              : Icons.bookmark_border,
+                          size: 16,
+                          color:
+                              message.isBookmarked
+                                  ? Colors.amber
+                                  : Colors.grey[600],
+                        ),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip:
+                            message.isBookmarked
+                                ? 'Remove bookmark'
+                                : 'Bookmark',
+                      ),
+                      const SizedBox(width: 4),
+                      IconButton(
+                        onPressed: () {
+                          Clipboard.setData(ClipboardData(text: message.text));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Copied')),
+                          );
+                        },
+                        icon: const Icon(Icons.copy, size: 16),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: 'Copy',
+                      ),
+                      const SizedBox(width: 4),
+                      if (_isSpeechServiceInitialized)
+                        ListenableBuilder(
+                          listenable: _speechService,
+                          builder:
+                              (_, _) => IconButton(
+                                icon: Icon(
+                                  _speechService.isSpeaking
+                                      ? Icons.volume_up
+                                      : Icons.volume_off,
+                                ),
+                                onPressed: () {
+                                  if (_speechService.isSpeaking) {
+                                    _speechService.stop();
+                                  } else {
+                                    _speechService.speak(message.text);
+                                  }
+                                },
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                tooltip: 'Read aloud',
+                              ),
+                        ),
+                    ],
+                  ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment:
+                      isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+                  children: [
+                    Text(
+                      _formatTime(message.timestamp),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.color?.withOpacity(0.6),
+                      ),
+                    ),
+                    if (message.isBookmarked) ...[
+                      const SizedBox(width: 4),
+                      Icon(Icons.bookmark, size: 12, color: Colors.amber[600]),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          if (isUser) ...[
+            const SizedBox(width: 8),
+            CircleAvatar(
+              radius: 16,
+              backgroundColor: Theme.of(context).primaryColor.withOpacity(0.2),
+              child: Icon(
+                Icons.person,
+                color: Theme.of(context).primaryColor,
+                size: 16,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTypingIndicator() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 12,
+            backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
+            child: Icon(
+              Icons.psychology,
+              color: Theme.of(context).primaryColor,
+              size: 12,
+            ),
+          ),
+          const SizedBox(width: 8),
+          AnimatedBuilder(
+            animation: _typingAnimation,
+            builder:
+                (context, _) => Row(
+                  children: List.generate(3, (i) {
+                    final opacity =
+                        0.3 +
+                        (0.7 * (((_typingAnimation.value + i * 0.3) % 1.0)));
+                    return Container(
+                      width: 6,
+                      height: 6,
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      decoration: BoxDecoration(
+                        color: Theme.of(
+                          context,
+                        ).primaryColor.withOpacity(opacity),
+                        shape: BoxShape.circle,
+                      ),
+                    );
+                  }),
+                ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            'AI is thinking...',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).primaryColor,
+              fontStyle: FontStyle.italic,
             ),
           ),
         ],

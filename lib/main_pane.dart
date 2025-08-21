@@ -212,7 +212,15 @@ class _MainPaneState extends State<MainPane> {
                 const Divider(height: 1),
                 // File viewer
                 // widget.previewFile is guaranteed non-null in this branch
-                Expanded(child: FileViewer(file: widget.previewFile!)),
+                Expanded(
+                  child: FileViewer(
+                    file: widget.previewFile!,
+                    onPdfPageChanged: (currentPage, totalPages) {
+                      // Optional: Handle page changes if needed for analytics
+                      debugPrint('PDF page changed: $currentPage/$totalPages');
+                    },
+                  ),
+                ),
               ],
             ),
           ),

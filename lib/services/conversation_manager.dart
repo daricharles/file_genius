@@ -109,7 +109,7 @@ class ConversationManager {
     required String fileName,
     required String fileType,
     required String filePath,
-    String? fileId, // ADDED
+    String? fileId,
     Map<String, dynamic>? fileMetadata,
   }) {
     final now = DateTime.now();
@@ -120,10 +120,11 @@ class ConversationManager {
       fileName: fileName,
       fileType: fileType,
       filePath: filePath,
-      fileId: fileId, // ADDED
+      fileId: fileId,
       createdAt: now,
       lastUpdatedAt: now,
-      messages: [_createWelcomeMessage(fileName, sessionId)],
+      // Removed automatic welcome message (start with empty history)
+      messages: [],
       fileMetadata: fileMetadata ?? {},
     );
   }
@@ -133,19 +134,6 @@ class ConversationManager {
     final now = DateTime.now();
     final random = Random();
     return 'session_${now.millisecondsSinceEpoch}_${random.nextInt(10000)}';
-  }
-
-  /// Create a welcome message for new sessions
-  EnhancedChatMessage _createWelcomeMessage(String fileName, String sessionId) {
-    return EnhancedChatMessage(
-      id: '${sessionId}_welcome',
-      text:
-          'Hello! I\'m FileGenius AI. I can help you analyze "$fileName" and answer questions about it. What would you like to know?',
-      isUser: false,
-      timestamp: DateTime.now(),
-      messageType: 'welcome',
-      metadata: {'isSystemMessage': true},
-    );
   }
 
   /// Add a message to a session
@@ -229,16 +217,12 @@ class ConversationManager {
     final sessionIndex = _sessions.indexWhere((s) => s.id == sessionId);
     if (sessionIndex != -1) {
       final session = _sessions[sessionIndex];
-      final welcomeMessage = session.messages.firstWhere(
-        (m) => m.messageType == 'welcome',
-        orElse: () => _createWelcomeMessage(session.fileName, sessionId),
-      );
 
       _sessions[sessionIndex] = session.copyWith(
-        messages: [welcomeMessage],
+        // Previously preserved/added welcome; now fully cleared
+        messages: [],
         lastUpdatedAt: DateTime.now(),
       );
-      // Save individual session to Firebase
       await _firebaseService.saveChatSession(_sessions[sessionIndex]);
     }
   }
