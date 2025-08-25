@@ -45,6 +45,7 @@ dependencies:
 
   # ─── File viewer (for PPT, PDf, and Docx files.) ───
   syncfusion_flutter_pdfviewer: ^24.2.9  # Better PDF viewer with text selection
+  syncfusion_flutter_pdf: ^24.2.9       # For PDF text extraction
   http: ^1.2.1            # <— NEW (for downloading the PDF)
   webview_flutter: ^4.5.0 # already present in your project
   webview_flutter_web: ^0.2.2+4  # Web support for WebView
@@ -62,6 +63,7 @@ dependencies:
   shared_preferences: ^2.2.2  # For storing chat sessions
   flutter_local_notifications: ^17.1.2
   provider: ^6.0.0
+  flutter_riverpod: ^2.4.9
   flutter_tts: ^4.0.2
   speech_to_text: ^6.6.0
   permission_handler: ^11.0.1
@@ -90,14 +92,14 @@ dev_dependencies:
 
 # The following section is specific to Flutter packages.
 flutter:
+  uses-material-design: true
   assets:
+    - assets/.env
     - assets/images/google_logo.png
     - assets/images/login_illustration.png
-    - .env
   # The following line ensures that the Material Icons font is
   # included with your application, so that you can use the icons in
   # the material Icons class.
-  uses-material-design: true
 
   # To add assets to your application, add an assets section, like this:
   # assets:

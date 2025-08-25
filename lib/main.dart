@@ -7,10 +7,10 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:provider/provider.dart';
@@ -209,9 +209,15 @@ Future<void> _initNotifications() async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await dotenv.load(fileName: 'assets/.env'); // match pubspec asset
+  } catch (e) {
+    debugPrint('dotenv not loaded: $e'); // don’t crash on web
+  }
+
+  // initialize Firebase here using your normal path
   await _initNotifications();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  await dotenv.load();
   if (kIsWeb) {
     WebViewPlatform.instance = WebWebViewPlatform();
   }
@@ -576,15 +582,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _loadUserData() async {
     if (_user == null) return;
 
-    setState(() {
-      _isLoading = true;
-    });
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
 
     try {
       final docRef = FirebaseFirestore.instance
           .collection('users')
           .doc(_user!.uid);
       final doc = await docRef.get();
+
+      if (!mounted) return; // <-- Add this check right after the await
 
       if (doc.exists) {
         final data = doc.data()!;

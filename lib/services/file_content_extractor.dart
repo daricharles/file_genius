@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'package:read_pdf_text/read_pdf_text.dart';
+import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 class FileContentExtractor {
   // Extract text content from different file types
@@ -39,20 +40,22 @@ class FileContentExtractor {
   static Future<String> _extractPdfContent(String fileUrl) async {
     try {
       if (kIsWeb) {
-        // Web: Use backend to extract PDF text
-        final response = await http.post(
-          Uri.parse('http://localhost:3000/extract-pdf-text'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'url': fileUrl}),
-        );
+        // Web: Download PDF and extract text on the client-side
+        final response = await http.get(Uri.parse(fileUrl));
         if (response.statusCode == 200) {
-          final text = response.body;
+          final Uint8List fileBytes = response.bodyBytes;
+          // Load the PDF document
+          final PdfDocument document = PdfDocument(inputBytes: fileBytes);
+          // Extract text from all pages
+          String text = PdfTextExtractor(document).extractText();
+          // Dispose the document
+          document.dispose();
           if (text.trim().isEmpty) {
             return 'No extractable text found in this PDF.';
           }
           return text;
         } else {
-          return 'Failed to extract PDF text from backend: \n${response.body}';
+          return 'Failed to download PDF for extraction: ${response.statusCode}';
         }
       } else {
         // Mobile/Desktop: Download and parse PDF
@@ -101,34 +104,9 @@ class FileContentExtractor {
   ) async {
     try {
       if (kIsWeb) {
-        String endpoint;
-        switch (fileType.toLowerCase()) {
-          case 'pptx':
-            endpoint = 'extract-pptx-text';
-            break;
-          case 'docx':
-            endpoint = 'extract-docx-text';
-            break;
-          case 'xlsx':
-            endpoint = 'extract-xlsx-text';
-            break;
-          default:
-            return 'Office document. Content can be analyzed through the file viewer interface.';
-        }
-        final response = await http.post(
-          Uri.parse('http://localhost:3000/$endpoint'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'url': fileUrl}),
-        );
-        if (response.statusCode == 200) {
-          final text = response.body;
-          if (text.trim().isEmpty) {
-            return 'No extractable text found in this $fileType file.';
-          }
-          return text;
-        } else {
-          return 'Failed to extract $fileType text from backend: \n${response.body}';
-        }
+        // For Office files on web, direct extraction is complex.
+        // We will return a placeholder message instead of calling a local server.
+        return 'Office document. Content can be analyzed through the file viewer interface.';
       } else {
         // For Office files, we'll return a description since direct text extraction
         // requires specialized libraries
