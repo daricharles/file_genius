@@ -1113,7 +1113,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           selectedFolder: _selectedFolder,
           files: _visibleFiles,
           onPickFiles: _pickFiles,
-          onDropFiles: (fs) => _handleDroppedFiles(fs, _selectedFolder),
+          onDropFiles: (fs) => _handleDroppedFiles(fs, _selectedFolder?.id),
           onOpenUrl: _openUrl,
           previewFile: _previewFile,
           onSelectFile:
@@ -1131,7 +1131,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           selectedFolder: _selectedFolder,
           files: _visibleFiles,
           onPickFiles: _pickFiles,
-          onDropFiles: (fs) => _handleDroppedFiles(fs, _selectedFolder),
+          onDropFiles: (fs) => _handleDroppedFiles(fs, _selectedFolder?.id),
           onOpenUrl: _openUrl,
           previewFile: _previewFile,
           onSelectFile:
@@ -1294,15 +1294,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       type: FileType.custom,
       allowedExtensions: ['pdf', 'pptx', 'docx'],
     );
-    if (res != null) _handleDroppedFiles(res.files, _selectedFolder);
+    if (res != null) _handleDroppedFiles(res.files, _selectedFolder?.id);
   }
 
   Future<void> _handleDroppedFiles(
     List<PlatformFile> dropped,
-    Folder? target,
+    String? folderId,
   ) async {
     if (dropped.isEmpty) return;
-    final folderId = target?.id;
 
     setState(() {
       _isUploading = true;
@@ -1337,7 +1336,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     if (firstReal != null) {
-      // Auto-select and analyze
+      // Auto-select and analyze with a small delay to ensure UI is ready
+      await Future.delayed(const Duration(milliseconds: 200));
       _startAutoAnalysis(firstReal);
     }
 
@@ -1368,6 +1368,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _previewFile = analyzed;
       }
     });
+
+    // Force a rebuild of the chat widget to trigger auto-summary
+    await Future.delayed(const Duration(milliseconds: 100));
+    if (mounted) {
+      setState(() {
+        // This will force the EnhancedAIChatWidget to rebuild with autoSummarize
+        _previewFile = analyzed;
+      });
+    }
   }
 
   Future<FileMeta> _uploadOne({

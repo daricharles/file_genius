@@ -68,50 +68,77 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     _initializeAnimations();
     _initializeChat();
     _initializeSpeechService();
-    if (widget.autoSummarize) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _runAutoSummary());
-    }
   }
 
   Future<void> _runAutoSummary() async {
     if (_autoSummaryRun || _aiBusy || widget.fileContent.trim().isEmpty) return;
+
     setState(() {
       _aiBusy = true;
     });
+
     final res = await _aiService.summarizeFile(
       fileName: widget.fileName,
       fileType: widget.fileType,
       fileContent: widget.fileContent,
     );
+
     if (!mounted) return;
-    setState(() {
-      _aiBusy = false;
-      _autoSummaryRun = true;
-      if (res.success) {
-        final summary = (res.data?['summary'] ?? '').toString();
-        _appendAIMessage('**Summary**\n\n$summary');
-        _followUps = (res.data?['follow_ups'] as List?)?.cast<String>() ?? [];
-      } else {
-        _appendAIMessage(
-          'Auto summary failed: ${res.message}. You can still ask questions.',
-        );
-      }
-    });
+
+    if (res.success) {
+      final summary = (res.data?['summary'] ?? '').toString();
+      final followUps =
+          (res.data?['follow_ups'] as List?)?.cast<String>() ?? [];
+
+      // Persist the summary message with follow-ups in metadata
+      await _appendAIMessage(
+        '**Summary**\n\n$summary',
+        messageType: 'summary',
+        metadata: {'follow_ups': followUps},
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _aiBusy = false;
+        _autoSummaryRun = true;
+        _followUps = followUps;
+      });
+    } else {
+      // Persist the failure notice as well
+      await _appendAIMessage(
+        'Auto summary failed: ${res.message}. You can still ask questions.',
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _aiBusy = false;
+        _autoSummaryRun = true;
+      });
+    }
   }
 
-  void _appendAIMessage(String text) {
+  Future<void> _appendAIMessage(
+    String text, {
+    String messageType = 'response',
+    Map<String, dynamic>? metadata,
+  }) async {
     if (_currentSession == null) return;
+    final msg = EnhancedChatMessage(
+      id: _uuid.v4(),
+      text: text,
+      isUser: false,
+      timestamp: DateTime.now(),
+      messageType: messageType,
+      metadata: metadata,
+    );
     setState(() {
-      _currentSession!.messages.add(
-        EnhancedChatMessage(
-          id: _uuid.v4(),
-          text: text,
-          isUser: false,
-          timestamp: DateTime.now(),
-          messageType: 'summary', // or 'response' if preferred
-        ),
-      );
+      _currentSession!.messages.add(msg);
     });
+    // Persist message so it's restored on refresh/revisit
+    await _conversationManager.addMessage(
+      sessionId: _currentSession!.id,
+      message: msg,
+    );
     _scrollToBottom();
   }
 
@@ -172,16 +199,16 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       if (!mounted) return;
       setState(() => _isInitializing = false);
 
-      // If autoSummarize is enabled and no summary yet, run it
+      // UPDATED: Only run auto-summary if there are no existing messages
+      // and autoSummarize is enabled
       if (widget.autoSummarize &&
           !_autoSummaryRun &&
-          (_currentSession!.messages.isEmpty ||
-              !_currentSession!.messages.any(
-                (m) =>
-                    (m.messageType == 'summary') ||
-                    m.text.startsWith('**Summary**'),
-              ))) {
+          _currentSession!.messages.isEmpty) {
         WidgetsBinding.instance.addPostFrameCallback((_) => _runAutoSummary());
+      }
+      // If there are existing messages, check if any contain follow-ups
+      else if (_currentSession!.messages.isNotEmpty) {
+        _extractFollowUpsFromHistory();
       }
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -190,6 +217,24 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     } catch (e) {
       if (mounted) setState(() => _isInitializing = false);
       debugPrint('Failed to initialize chat: $e');
+    }
+  }
+
+  // NEW: Extract follow-ups from existing chat history
+  void _extractFollowUpsFromHistory() {
+    for (final message in _currentSession!.messages) {
+      if (message.messageType == 'summary' && !message.isUser) {
+        // Check if this message has follow-ups in metadata
+        final metadata = message.metadata;
+        if (metadata != null && metadata.containsKey('follow_ups')) {
+          final followUps = metadata['follow_ups'] as List?;
+          if (followUps != null) {
+            setState(() {
+              _followUps = followUps.cast<String>();
+            });
+          }
+        }
+      }
     }
   }
 

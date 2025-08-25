@@ -323,7 +323,7 @@ class _MainPaneState extends State<MainPane> {
                           fileContent: snapshot.data ?? '',
                           filePath: widget.previewFile!.url,
                           fileId: widget.previewFile!.id,
-                          autoSummarize: shouldAutoSummarize, // now supported
+                          autoSummarize: shouldAutoSummarize,
                           onInteractionSuccess: widget.onAIInteractionSuccess,
                         );
                       },
