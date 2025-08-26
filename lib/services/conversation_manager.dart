@@ -1,6 +1,7 @@
 import 'dart:convert';
-import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/chat_models.dart';
 import 'firebase_chat_service.dart';
 
@@ -12,11 +13,14 @@ class ConversationManager {
   ConversationManager._();
 
   final FirebaseChatService _firebaseService = FirebaseChatService();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   List<ChatSession> _sessions = [];
   ChatAnalytics? _analytics;
+  User? _user;
 
   /// Initialize the conversation manager
   Future<void> initialize() async {
+    _user = FirebaseAuth.instance.currentUser;
     await _loadSessions();
     await _loadAnalytics();
   }
@@ -36,16 +40,6 @@ class ConversationManager {
     }
   }
 
-  /// Save analytics to Firebase
-  Future<void> _saveAnalytics() async {
-    try {
-      if (_analytics != null) {
-        await _firebaseService.saveChatAnalytics(_analytics!);
-      }
-    } catch (e) {
-      debugPrint('Error saving chat analytics: $e');
-    }
-  }
 
   /// Load analytics from Firebase
   Future<void> _loadAnalytics() async {
@@ -75,65 +69,120 @@ class ConversationManager {
     Map<String, dynamic>? fileMetadata,
     String? fileId,
   }) async {
-    bool keyMatcher(ChatSession s) {
-      if (fileId != null && s.fileId == fileId && !s.isArchived) return true;
-      return s.filePath == filePath && !s.isArchived;
+    final sessionId = _generateSessionId(fileName, filePath, fileId);
+
+    // Try to load existing session first
+    ChatSession? existingSession = await _loadSession(sessionId);
+
+    if (existingSession != null) {
+      return existingSession;
     }
 
-    ChatSession? existing;
-    try {
-      existing = _sessions.firstWhere(keyMatcher);
-    } catch (_) {
-      existing = null;
-    }
-
-    if (existing != null) {
-      _deduplicateSessionMessages(existing);
-      return existing;
-    }
-
-    final newSession = _createNewSession(
-      fileName: fileName,
-      fileType: fileType,
-      filePath: filePath,
-      fileId: fileId,
-      fileMetadata: fileMetadata,
-    );
-    _sessions.insert(0, newSession);
-    await _firebaseService.saveChatSession(newSession);
-    return newSession;
-  }
-
-  /// Create a new chat session
-  ChatSession _createNewSession({
-    required String fileName,
-    required String fileType,
-    required String filePath,
-    String? fileId,
-    Map<String, dynamic>? fileMetadata,
-  }) {
-    final now = DateTime.now();
-    final sessionId = _generateSessionId();
-
-    return ChatSession(
+    // Create new session if none exists
+    final session = ChatSession(
       id: sessionId,
       fileName: fileName,
       fileType: fileType,
       filePath: filePath,
-      fileId: fileId,
-      createdAt: now,
-      lastUpdatedAt: now,
-      // Removed automatic welcome message (start with empty history)
-      messages: [],
       fileMetadata: fileMetadata ?? {},
+      fileId: fileId,
+      createdAt: DateTime.now(),
+      lastUpdatedAt: DateTime.now(),
+      messages: [],
     );
+
+    await _saveSession(session);
+    return session;
   }
 
-  /// Generate a unique session ID
-  String _generateSessionId() {
-    final now = DateTime.now();
-    final random = Random();
-    return 'session_${now.millisecondsSinceEpoch}_${random.nextInt(10000)}';
+  Future<ChatSession?> _loadSession(String sessionId) async {
+    try {
+      if (_user == null) return null;
+
+      final doc =
+          await _firestore
+              .collection('users')
+              .doc(_user!.uid)
+              .collection('chat_sessions')
+              .doc(sessionId)
+              .get();
+
+      if (!doc.exists) return null;
+
+      final data = doc.data()!;
+      final messagesData = data['messages'] as List? ?? [];
+
+      final messages =
+          messagesData.map((msgData) {
+            return EnhancedChatMessage(
+              id: msgData['id'] ?? '',
+              text: msgData['text'] ?? '',
+              isUser: msgData['isUser'] ?? false,
+              timestamp:
+                  (msgData['timestamp'] as Timestamp?)?.toDate() ??
+                  DateTime.now(),
+              messageType: msgData['messageType'] ?? 'response',
+              metadata: msgData['metadata'] as Map<String, dynamic>?,
+              isBookmarked: msgData['isBookmarked'] ?? false,
+            );
+          }).toList();
+
+      return ChatSession(
+        id: sessionId,
+        fileName: data['fileName'] ?? '',
+        fileType: data['fileType'] ?? '',
+        filePath: data['filePath'] ?? '',
+        fileMetadata: data['fileMetadata'] as Map<String, dynamic>? ?? {},
+        fileId: data['fileId'],
+        createdAt:
+            (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        lastUpdatedAt:
+            (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        messages: messages,
+      );
+    } catch (e) {
+      debugPrint('Error loading session: $e');
+      return null;
+    }
+  }
+
+  Future<void> _saveSession(ChatSession session) async {
+    try {
+      if (_user == null) return;
+
+      final messagesData =
+          session.messages
+              .map(
+                (msg) => {
+                  'id': msg.id,
+                  'text': msg.text,
+                  'isUser': msg.isUser,
+                  'timestamp': Timestamp.fromDate(msg.timestamp),
+                  'messageType': msg.messageType,
+                  'metadata': msg.metadata,
+                  'isBookmarked': msg.isBookmarked,
+                },
+              )
+              .toList();
+
+      await _firestore
+          .collection('users')
+          .doc(_user!.uid)
+          .collection('chat_sessions')
+          .doc(session.id)
+          .set({
+            'fileName': session.fileName,
+            'fileType': session.fileType,
+            'filePath': session.filePath,
+            'fileMetadata': session.fileMetadata,
+            'fileId': session.fileId,
+            'createdAt': Timestamp.fromDate(session.createdAt),
+            'updatedAt': Timestamp.fromDate(DateTime.now()),
+            'messages': messagesData,
+          });
+    } catch (e) {
+      debugPrint('Error saving session: $e');
+    }
   }
 
   /// Add a message to a session
@@ -141,74 +190,59 @@ class ConversationManager {
     required String sessionId,
     required EnhancedChatMessage message,
   }) async {
-    final idx = _sessions.indexWhere((s) => s.id == sessionId);
-    if (idx == -1) return;
-    final session = _sessions[idx];
+    try {
+      if (_user == null) return;
 
-    // Skip duplicate id
-    if (session.messages.any((m) => m.id == message.id)) {
-      debugPrint('ConversationManager: duplicate id ${message.id}, skipped');
-      return;
+      // Update the session in Firestore
+      await _firestore
+          .collection('users')
+          .doc(_user!.uid)
+          .collection('chat_sessions')
+          .doc(sessionId)
+          .update({
+            'messages': FieldValue.arrayUnion([
+              {
+                'id': message.id,
+                'text': message.text,
+                'isUser': message.isUser,
+                'timestamp': Timestamp.fromDate(message.timestamp),
+                'messageType': message.messageType,
+                'metadata': message.metadata,
+                'isBookmarked': message.isBookmarked,
+              },
+            ]),
+            'updatedAt': Timestamp.fromDate(DateTime.now()),
+          });
+    } catch (e) {
+      debugPrint('Error adding message: $e');
     }
-    // Skip consecutive identical (same author + trimmed text)
-    final last = session.messages.isNotEmpty ? session.messages.last : null;
-    if (last != null &&
-        last.isUser == message.isUser &&
-        last.text.trim() == message.text.trim()) {
-      debugPrint('ConversationManager: consecutive duplicate text skipped');
-      return;
-    }
-
-    final updated = session.copyWith(
-      messages: [...session.messages, message],
-      lastUpdatedAt: DateTime.now(),
-    );
-    _sessions[idx] = updated;
-    await _persistSession(updated);
-    await _updateAnalytics(message);
   }
 
-  /// Update a specific message in a session
+  /// Update a message in a session
   Future<void> updateMessage({
     required String sessionId,
     required String messageId,
     required EnhancedChatMessage updatedMessage,
   }) async {
-    final sessionIndex = _sessions.indexWhere((s) => s.id == sessionId);
-    if (sessionIndex != -1) {
-      final messages = _sessions[sessionIndex].messages;
-      final messageIndex = messages.indexWhere((m) => m.id == messageId);
+    try {
+      if (_user == null) return;
 
-      if (messageIndex != -1) {
-        messages[messageIndex] = updatedMessage;
-        _sessions[sessionIndex] = _sessions[sessionIndex].copyWith(
-          messages: messages,
-          lastUpdatedAt: DateTime.now(),
-        );
-        // Save individual session to Firebase
-        await _firebaseService.saveChatSession(_sessions[sessionIndex]);
-      }
-    }
-  }
+      // Load the session
+      final session = await _loadSession(sessionId);
+      if (session == null) return;
 
-  /// Delete a message from a session
-  Future<void> deleteMessage({
-    required String sessionId,
-    required String messageId,
-  }) async {
-    final sessionIndex = _sessions.indexWhere((s) => s.id == sessionId);
-    if (sessionIndex != -1) {
-      final updatedMessages =
-          _sessions[sessionIndex].messages
-              .where((m) => m.id != messageId)
-              .toList();
-
-      _sessions[sessionIndex] = _sessions[sessionIndex].copyWith(
-        messages: updatedMessages,
-        lastUpdatedAt: DateTime.now(),
+      // Update the message in the session
+      final messageIndex = session.messages.indexWhere(
+        (m) => m.id == messageId,
       );
-      // Save individual session to Firebase
-      await _firebaseService.saveChatSession(_sessions[sessionIndex]);
+      if (messageIndex == -1) return;
+
+      session.messages[messageIndex] = updatedMessage;
+
+      // Save the updated session
+      await _saveSession(session);
+    } catch (e) {
+      debugPrint('Error updating message: $e');
     }
   }
 
@@ -282,68 +316,6 @@ class ConversationManager {
     }
   }
 
-  /// Update analytics based on new message
-  Future<void> _updateAnalytics(EnhancedChatMessage message) async {
-    // Initialize analytics if null
-    _analytics ??= ChatAnalytics(
-      totalSessions: 0,
-      totalMessages: 0,
-      totalQuestions: 0,
-      questionCategories: {},
-      fileTypeInteractions: {},
-      averageSessionLength: 0.0,
-      popularQuestions: [],
-      lastAnalyzed: DateTime.now(),
-    );
-
-    // Update analytics
-    if (message.isUser) {
-      // This is a user question
-      final updatedQuestionCategories = Map<String, int>.from(
-        _analytics!.questionCategories,
-      );
-      final category = message.messageType ?? 'general';
-      updatedQuestionCategories[category] =
-          (updatedQuestionCategories[category] ?? 0) + 1;
-
-      _analytics = ChatAnalytics(
-        totalSessions: _sessions.length,
-        totalMessages: _analytics!.totalMessages + 1,
-        totalQuestions: _analytics!.totalQuestions + 1,
-        questionCategories: updatedQuestionCategories,
-        fileTypeInteractions: _analytics!.fileTypeInteractions,
-        averageSessionLength: _calculateAverageSessionLength(),
-        popularQuestions: _analytics!.popularQuestions,
-        lastAnalyzed: DateTime.now(),
-      );
-    } else {
-      // This is an AI response
-      _analytics = ChatAnalytics(
-        totalSessions: _sessions.length,
-        totalMessages: _analytics!.totalMessages + 1,
-        totalQuestions: _analytics!.totalQuestions,
-        questionCategories: _analytics!.questionCategories,
-        fileTypeInteractions: _analytics!.fileTypeInteractions,
-        averageSessionLength: _calculateAverageSessionLength(),
-        popularQuestions: _analytics!.popularQuestions,
-        lastAnalyzed: DateTime.now(),
-      );
-    }
-
-    await _saveAnalytics();
-  }
-
-  /// Calculate average session length
-  double _calculateAverageSessionLength() {
-    if (_sessions.isEmpty) return 0.0;
-
-    final totalMessages = _sessions.fold<int>(
-      0,
-      (sum, session) => sum + session.messages.length,
-    );
-
-    return totalMessages / _sessions.length;
-  }
 
   /// Get conversation context for AI (last few messages)
   List<EnhancedChatMessage> getConversationContext(
@@ -475,5 +447,11 @@ class ConversationManager {
         ..addAll(cleaned);
       _persistSession(session);
     }
+  }
+
+  String _generateSessionId(String fileName, String filePath, String? fileId) {
+    // Use fileId if available for consistency, otherwise use file path
+    final identifier = fileId ?? filePath;
+    return 'session_${identifier.hashCode.abs()}';
   }
 }

@@ -75,6 +75,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
 
     setState(() {
       _aiBusy = true;
+      _autoSummaryRun = true; // Set this early to prevent re-runs
     });
 
     final res = await _aiService.summarizeFile(
@@ -100,7 +101,6 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       if (!mounted) return;
       setState(() {
         _aiBusy = false;
-        _autoSummaryRun = true;
         _followUps = followUps;
       });
     } else {
@@ -112,7 +112,6 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       if (!mounted) return;
       setState(() {
         _aiBusy = false;
-        _autoSummaryRun = true;
       });
     }
   }
@@ -199,16 +198,19 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       if (!mounted) return;
       setState(() => _isInitializing = false);
 
-      // UPDATED: Only run auto-summary if there are no existing messages
-      // and autoSummarize is enabled
-      if (widget.autoSummarize &&
-          !_autoSummaryRun &&
-          _currentSession!.messages.isEmpty) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _runAutoSummary());
-      }
-      // If there are existing messages, check if any contain follow-ups
-      else if (_currentSession!.messages.isNotEmpty) {
+      // Check if we have existing messages
+      if (_currentSession!.messages.isNotEmpty) {
+        // Extract follow-ups from existing chat history
         _extractFollowUpsFromHistory();
+        // Mark auto-summary as already run since we have existing messages
+        _autoSummaryRun = true;
+      } else {
+        // Only run auto-summary if there are no existing messages
+        if (widget.autoSummarize && !_autoSummaryRun) {
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _runAutoSummary(),
+          );
+        }
       }
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -220,7 +222,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     }
   }
 
-  // NEW: Extract follow-ups from existing chat history
+  // Extract follow-ups from existing chat history
   void _extractFollowUpsFromHistory() {
     for (final message in _currentSession!.messages) {
       if (message.messageType == 'summary' && !message.isUser) {
@@ -232,6 +234,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
             setState(() {
               _followUps = followUps.cast<String>();
             });
+            break; // Only get follow-ups from the first summary message
           }
         }
       }

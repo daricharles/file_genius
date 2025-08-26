@@ -147,7 +147,7 @@ class _MainPaneState extends State<MainPane> {
       final supported = FileContentExtractor.supportsAIAnalysis(
         widget.previewFile!.type,
       );
-      final shouldAutoSummarize = _autoSummarized.add(
+      _autoSummarized.add(
         widget.previewFile!.id,
       ); // true first time only
 
@@ -323,7 +323,14 @@ class _MainPaneState extends State<MainPane> {
                           fileContent: snapshot.data ?? '',
                           filePath: widget.previewFile!.url,
                           fileId: widget.previewFile!.id,
-                          autoSummarize: shouldAutoSummarize,
+                          fileMetadata: {
+                            'size': widget.previewFile!.size,
+                            'uploadedAt':
+                                widget.previewFile!.uploadedAt
+                                    .toIso8601String(),
+                          },
+                          autoSummarize:
+                              true, // Always allow auto-summary, widget will handle if it should run
                           onInteractionSuccess: widget.onAIInteractionSuccess,
                         );
                       },
