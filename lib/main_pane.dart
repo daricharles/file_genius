@@ -1,19 +1,3 @@
-// mainPane.dart – split‑pane workspace
-//
-// Exposed as a reusable widget so `home_screen.dart` (or any
-// parent) can drop it in and control it via the callbacks.
-// ─────────────────────────────────────────────────────────────
-// • Left Pane  – file upload / list / preview (depending on state)
-// • Right Pane – AI chat area (placeholder)
-//
-// It expects:
-//   – a `selectedFolder` (nullable)
-//   – current file list for that folder (empty list allowed)
-//   – callbacks for picking & dropping files, opening a file URL
-//
-// NOTE:  This file only focuses on layout + state‑aware rendering.
-//        Drag‑and‑drop UI itself lives in `drag_drop_zone.dart`.
-
 // ignore_for_file: deprecated_member_use
 
 import 'package:flutter/material.dart';
@@ -24,6 +8,7 @@ import 'drag_drop_zone.dart';
 import 'file_viewer.dart';
 import 'services/file_content_extractor.dart';
 import 'widgets/enhanced_ai_chat_widget.dart';
+import 'services/speech_service.dart';
 
 class MainPane extends StatefulWidget {
   const MainPane({
@@ -58,6 +43,8 @@ class _MainPaneState extends State<MainPane> {
   Future<String>? _fileContentFuture;
   String? _fileContentFutureKey;
   final Set<String> _autoSummarized = {}; // now used
+  final SpeechService _speechService = SpeechService(); // TTS service
+  bool _fileTtsPaused = false; // track pause state for file-preview TTS
 
   @override
   void initState() {
@@ -140,6 +127,77 @@ class _MainPaneState extends State<MainPane> {
     });
   }
 
+  Future<void> _toggleFileTts() async {
+    try {
+      if (!_speechService.isReady) {
+        await _speechService.initialize();
+      }
+
+      // If currently speaking, toggle pause/resume
+      if (_speechService.isSpeaking) {
+        if (_fileTtsPaused) {
+          // Try resume; fallback to speak if resume isn't supported
+          try {
+            await (_speechService as dynamic).resume();
+          } catch (_) {
+            // No resume API; fall back to restarting (best-effort)
+            if (_fileContentFuture != null) {
+              final String content = await _fileContentFuture!;
+              await _speechService.speak(content);
+            }
+          }
+          if (mounted) setState(() => _fileTtsPaused = false);
+          return;
+        } else {
+          // Try pause; fallback to stop if pause isn't supported
+          try {
+            await (_speechService as dynamic).pause();
+          } catch (_) {
+            await _speechService.stop();
+          }
+          if (mounted) setState(() => _fileTtsPaused = true);
+          return;
+        }
+      }
+
+      // Start fresh
+      if (_fileContentFuture == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No readable content found in file')),
+          );
+        }
+        return;
+      }
+
+      final String content = await _fileContentFuture!;
+      if (content.trim().isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No readable content found in file')),
+          );
+        }
+        return;
+      }
+
+      await _speechService.speak(
+        content,
+        onComplete: () {
+          if (!mounted) return;
+          setState(() {
+            _fileTtsPaused = false;
+          });
+        },
+      );
+      if (mounted) setState(() => _fileTtsPaused = false);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('TTS failed: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // If a file is selected for preview, show split view
@@ -147,9 +205,7 @@ class _MainPaneState extends State<MainPane> {
       final supported = FileContentExtractor.supportsAIAnalysis(
         widget.previewFile!.type,
       );
-      _autoSummarized.add(
-        widget.previewFile!.id,
-      ); // true first time only
+      _autoSummarized.add(widget.previewFile!.id); // true first time only
 
       return Row(
         children: [
@@ -197,6 +253,31 @@ class _MainPaneState extends State<MainPane> {
                         tooltip: 'Download file',
                         onPressed:
                             () => widget.onOpenUrl(widget.previewFile!.url),
+                      ),
+                      // Add TTS icon next to existing Download/Delete actions
+                      ListenableBuilder(
+                        listenable: _speechService,
+                        builder:
+                            (_, _) => IconButton(
+                              tooltip:
+                                  _speechService.isSpeaking
+                                      ? (_fileTtsPaused
+                                          ? 'Resume reading'
+                                          : 'Pause reading')
+                                      : 'Read aloud',
+                              icon: Icon(
+                                _speechService.isSpeaking
+                                    ? (_fileTtsPaused
+                                        ? Icons.play_arrow
+                                        : Icons.pause)
+                                    : Icons.volume_up,
+                                color:
+                                    _speechService.isSpeaking && !_fileTtsPaused
+                                        ? Colors.redAccent
+                                        : Theme.of(context).iconTheme.color,
+                              ),
+                              onPressed: _toggleFileTts,
+                            ),
                       ),
                       // Delete icon
                       IconButton(

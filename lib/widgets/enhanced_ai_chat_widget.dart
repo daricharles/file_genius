@@ -45,6 +45,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   final ConversationManager _conversationManager = ConversationManager.instance;
   final Uuid _uuid = const Uuid();
   final SpeechService _speechService = SpeechService();
+  bool _ttsPaused = false; // track pause state for AI TTS
 
   ChatSession? _currentSession;
   bool _isLoading = false;
@@ -554,11 +555,19 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
             ),
           ),
           _buildSessionInfo(),
+
+          // NEW: Generate Quiz button
+          IconButton(
+            tooltip: 'Generate Quiz',
+            icon: const Icon(Icons.quiz),
+            onPressed: _openGenerateQuizDialog,
+          ),
+
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
             itemBuilder:
-                (c) => [
-                  const PopupMenuItem(
+                (c) => const [
+                  PopupMenuItem(
                     value: 'clear',
                     child: ListTile(
                       leading: Icon(Icons.clear_all),
@@ -566,7 +575,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                       dense: true,
                     ),
                   ),
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'export',
                     child: ListTile(
                       leading: Icon(Icons.download),
@@ -574,7 +583,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                       dense: true,
                     ),
                   ),
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: 'archive',
                     child: ListTile(
                       leading: Icon(Icons.archive),
@@ -601,6 +610,77 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
           ),
         ],
       ),
+    );
+  }
+
+  // NEW: Quiz dialog and dispatch
+  void _openGenerateQuizDialog() {
+    String quizType = 'MCQs';
+    final controller = TextEditingController(text: '10');
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Generate Quiz'),
+          content: StatefulBuilder(
+            builder:
+                (context, setState) => Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<String>(
+                      value: quizType,
+                      items: const [
+                        DropdownMenuItem(value: 'MCQs', child: Text('MCQs')),
+                        DropdownMenuItem(
+                          value: 'True/False',
+                          child: Text('True/False'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Fill-in-the-Blank',
+                          child: Text('Fill-in-the-Blank'),
+                        ),
+                      ],
+                      onChanged: (v) => setState(() => quizType = v ?? 'MCQs'),
+                      decoration: const InputDecoration(
+                        labelText: 'Question type',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: controller,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Number of questions (max 50)',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                  ],
+                ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final raw = int.tryParse(controller.text.trim()) ?? 0;
+                final count = raw.clamp(1, 50);
+                Navigator.pop(ctx);
+
+                // Send as a normal user message so it's persisted
+                final prompt =
+                    'Generate a $count-question $quizType quiz based on the file. '
+                    'Include the correct answers. Keep it relevant to the document.';
+                await _sendMessage(prompt: prompt, messageType: 'quiz');
+              },
+              child: const Text('Generate'),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -649,10 +729,11 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
               child: TextField(
                 controller: _questionController,
                 minLines: 1,
-                maxLines: 4,
+                maxLines: 1, // single-line to prevent newlines
                 enabled: !_isLoading,
-                textInputAction: TextInputAction.newline,
-                keyboardType: TextInputType.multiline,
+                textInputAction: TextInputAction.send, // Enter sends
+                keyboardType: TextInputType.text,
+                onSubmitted: _isLoading ? null : (_) => _sendMessage(),
                 decoration: InputDecoration(
                   hintText: 'Ask about ${widget.fileName}...',
                   border: OutlineInputBorder(
@@ -681,7 +762,6 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                           )
                           : null,
                 ),
-                onSubmitted: _isLoading ? null : (_) => _sendMessage(),
               ),
             ),
           ),
@@ -906,19 +986,72 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                               (_, _) => IconButton(
                                 icon: Icon(
                                   _speechService.isSpeaking
-                                      ? Icons.volume_up
-                                      : Icons.volume_off,
+                                      ? (_ttsPaused
+                                          ? Icons.play_arrow
+                                          : Icons.pause)
+                                      : Icons.volume_up,
                                 ),
-                                onPressed: () {
-                                  if (_speechService.isSpeaking) {
-                                    _speechService.stop();
-                                  } else {
-                                    _speechService.speak(message.text);
+                                onPressed: () async {
+                                  try {
+                                    if (_speechService.isSpeaking) {
+                                      if (_ttsPaused) {
+                                        // resume
+                                        try {
+                                          await (_speechService as dynamic)
+                                              .resume();
+                                        } catch (_) {
+                                          // fallback: speak from start
+                                          await _speechService.speak(
+                                            message.text,
+                                            onComplete: () {
+                                              if (!mounted) return;
+                                              setState(
+                                                () => _ttsPaused = false,
+                                              );
+                                            },
+                                          );
+                                        }
+                                        if (mounted) {
+                                          setState(() => _ttsPaused = false);
+                                        }
+                                      } else {
+                                        // pause
+                                        try {
+                                          await (_speechService as dynamic)
+                                              .pause();
+                                        } catch (_) {
+                                          await _speechService.stop();
+                                        }
+                                        if (mounted) {
+                                          setState(() => _ttsPaused = true);
+                                        }
+                                      }
+                                    } else {
+                                      // start fresh
+                                      await _speechService.speak(
+                                        message.text,
+                                        onComplete: () {
+                                          if (!mounted) return;
+                                          setState(() => _ttsPaused = false);
+                                        },
+                                      );
+                                      if (mounted) {
+                                        setState(() => _ttsPaused = false);
+                                      }
+                                    }
+                                  } catch (e) {
+                                    if (!mounted) return;
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('TTS failed: $e')),
+                                    );
                                   }
                                 },
                                 padding: EdgeInsets.zero,
                                 constraints: const BoxConstraints(),
-                                tooltip: 'Read aloud',
+                                tooltip:
+                                    _speechService.isSpeaking
+                                        ? (_ttsPaused ? 'Resume' : 'Pause')
+                                        : 'Read aloud',
                               ),
                         ),
                     ],

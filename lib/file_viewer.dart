@@ -21,7 +21,6 @@ class _FileViewerState extends State<FileViewer> {
   Timer? _hideCounterTimer;
   final SpeechService _speech = SpeechService();
 
-  bool _speaking = false;
   bool _webViewError = false;
   bool _showPdfPageCounter = false;
   int _currentPdfPage = 1;
@@ -30,7 +29,7 @@ class _FileViewerState extends State<FileViewer> {
   // TTS with highlighting variables
   String _fullText = '';
   List<TextSpan> _highlightedTextSpans = [];
-  int _currentWordIndex = 0;
+  final int _currentWordIndex = 0;
   List<String> _words = [];
   Timer? _highlightTimer;
   final ScrollController _textScrollController = ScrollController();
@@ -55,9 +54,9 @@ class _FileViewerState extends State<FileViewer> {
             ? widget.file.summary!
             : (widget.file.extractedText?.isNotEmpty == true
                 ? widget.file.extractedText!
-                : 'No text available yet.');
+                : ''); // removed placeholder text
 
-    _words = _fullText.split(RegExp(r'\s+'));
+    _words = _fullText.trim().isEmpty ? [] : _fullText.split(RegExp(r'\s+'));
     _generateTextSpans();
   }
 
@@ -110,93 +109,6 @@ class _FileViewerState extends State<FileViewer> {
     });
   }
 
-  Future<void> _toggleSpeak() async {
-    if (_speaking) {
-      await _stopSpeaking();
-      return;
-    }
-    await _startSpeaking();
-  }
-
-  Future<void> _startSpeaking() async {
-    if (_fullText.trim().isEmpty) return;
-
-    setState(() {
-      _speaking = true;
-      _currentWordIndex = 0;
-    });
-
-    // Start TTS
-    await _speech.speak(
-      _fullText,
-      onComplete: () {
-        if (mounted) {
-          setState(() {
-            _speaking = false;
-            _currentWordIndex = 0;
-          });
-          _generateTextSpans();
-          _highlightTimer?.cancel();
-        }
-      },
-    );
-
-    // Start word highlighting timer
-    _startWordHighlighting();
-  }
-
-  void _startWordHighlighting() {
-    _highlightTimer?.cancel();
-
-    // Calculate approximate timing per word (adjust based on speech rate)
-    final wordsPerMinute = 150; // Average reading speed
-    final millisecondsPerWord = (60 * 1000) ~/ wordsPerMinute;
-
-    _highlightTimer = Timer.periodic(
-      Duration(milliseconds: millisecondsPerWord),
-      (timer) {
-        if (!_speaking || _currentWordIndex >= _words.length) {
-          timer.cancel();
-          return;
-        }
-
-        setState(() {
-          _currentWordIndex++;
-          _generateTextSpans();
-        });
-
-        // Auto-scroll to keep highlighted word visible
-        _autoScrollToCurrentWord();
-      },
-    );
-  }
-
-  void _autoScrollToCurrentWord() {
-    if (!_textScrollController.hasClients) return;
-
-    // Estimate position based on current word index
-    final totalWords = _words.length;
-    final progress = _currentWordIndex / totalWords;
-    final maxScroll = _textScrollController.position.maxScrollExtent;
-    final targetScroll = maxScroll * progress;
-
-    _textScrollController.animateTo(
-      targetScroll,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
-  }
-
-  Future<void> _stopSpeaking() async {
-    await _speech.stop();
-    _highlightTimer?.cancel();
-    setState(() {
-      _speaking = false;
-      _currentWordIndex = 0;
-    });
-    _generateTextSpans();
-  }
-
   @override
   void dispose() {
     _hideCounterTimer?.cancel();
@@ -205,17 +117,6 @@ class _FileViewerState extends State<FileViewer> {
     _textScrollController.dispose();
     _speech.stop();
     super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (widget.file.url.isEmpty) {
-      return const Center(child: Text('No file selected.'));
-    }
-
-    if (_isPdf) return _buildPdfViewer();
-    if (_isOfficeFile) return _buildOfficeViewer();
-    return _buildTextViewer();
   }
 
   Widget _buildPdfViewer() {
@@ -251,7 +152,6 @@ class _FileViewerState extends State<FileViewer> {
               ),
             ),
           ),
-        Positioned(top: 12, right: 12, child: _ttsButton()),
       ],
     );
   }
@@ -264,7 +164,6 @@ class _FileViewerState extends State<FileViewer> {
             : _webViewController != null
             ? WebViewWidget(controller: _webViewController!)
             : const Center(child: CircularProgressIndicator()),
-        Positioned(top: 12, right: 12, child: _ttsButton()),
       ],
     );
   }
@@ -303,23 +202,17 @@ class _FileViewerState extends State<FileViewer> {
             ),
           ),
         ),
-        Positioned(top: 12, right: 12, child: _ttsButton()),
       ],
     );
   }
 
-  Widget _ttsButton() {
-    return Material(
-      color: Colors.black54,
-      shape: const CircleBorder(),
-      child: IconButton(
-        tooltip: _speaking ? 'Stop Reading' : 'Read Aloud',
-        icon: Icon(
-          _speaking ? Icons.stop_circle : Icons.volume_up,
-          color: Colors.white,
-        ),
-        onPressed: _toggleSpeak,
-      ),
-    );
+  // Remove the overlay TTS icon from the file preview pane
+  @override
+  Widget build(BuildContext context) {
+    // Show a single viewer depending on file type; only show text viewer when we have text
+    if (_isPdf) return _buildPdfViewer();
+    if (_isOfficeFile) return _buildOfficeViewer();
+    if (_fullText.trim().isEmpty) return const SizedBox.shrink();
+    return _buildTextViewer();
   }
 }
