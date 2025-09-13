@@ -1,6 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'dart:convert';
+import 'dart:math';
+import '../constants.dart';
 
 final String? apiKey = dotenv.env['GEMINI_API_KEY'];
 
@@ -34,59 +36,66 @@ class AIService {
   static final GeminiHttpFallback _fallback = GeminiHttpFallback();
 
   Future<AIResponse> _handleRequest(String prompt, String model) async {
-    try {
-      final answer = await _fallback.generateContent(prompt, model: model);
-      return AIResponse(
-        success: true,
-        message: 'AI response received successfully',
-        data: {'answer': answer},
-      );
-    } on DioException catch (e) {
-      final statusCode = e.response?.statusCode;
-      final errorMessage = e.response?.data?['error']?['message'] ?? e.message;
+    // Ordered attempts: requested model, then the other family (pro <-> flash)
+    final attempts =
+        <String>{
+          model,
+          if (model == kDefaultGeminiModel)
+            kFallbackGeminiModel
+          else
+            kDefaultGeminiModel,
+        }.toList();
 
-      // Fallback logic
-      if (model == 'gemini-1.5-flash-latest' && statusCode == 429) {
+    // Simple exponential backoff with jitter for retryable errors
+    final rand = Random();
+    final backoffs = <Duration>[
+      const Duration(milliseconds: 750),
+      const Duration(milliseconds: 1500),
+    ];
+
+    DioException? lastDioError;
+
+    for (final m in attempts) {
+      for (int i = 0; i <= backoffs.length; i++) {
         try {
-          final fallbackAnswer = await _fallback.generateContent(
-            prompt,
-            model: 'gemini-1.5-pro-latest',
-          );
+          final answer = await _fallback.generateContent(prompt, model: m);
           return AIResponse(
             success: true,
-            message: 'Fallback model used: gemini-1.5-pro-latest',
-            data: {'answer': fallbackAnswer},
+            message: 'AI response received successfully',
+            data: {'answer': answer, 'model': m},
           );
-        } catch (_) {
-          return AIResponse(
-            success: false,
-            message: 'Free-tier quota exceeded and fallback also failed.',
-            data: null,
-          );
+        } on DioException catch (e) {
+          lastDioError = e;
+          final code = e.response?.statusCode ?? 0;
+          final retryable = code == 429 || code == 503; // quota or transient
+          if (retryable && i < backoffs.length) {
+            final jitter = Duration(milliseconds: rand.nextInt(300));
+            await Future.delayed(backoffs[i] + jitter);
+            continue; // retry same model
+          }
+          break; // move to next model or finish
         }
       }
+    }
 
-      // Friendly quota error
-      if (statusCode == 429) {
-        return AIResponse(
-          success: false,
-          message: 'You’ve exceeded your quota. Please try again later.',
-          data: null,
-        );
-      }
-
+    // Build a clear error after exhausting retries/models
+    final statusCode = lastDioError?.response?.statusCode;
+    if (statusCode == 429) {
       return AIResponse(
         success: false,
-        message: 'Gemini API error: $errorMessage',
-        data: null,
-      );
-    } catch (e) {
-      return AIResponse(
-        success: false,
-        message: 'Unexpected error: ${e.toString()}',
+        message: 'You’ve exceeded your quota. Please try again later.',
         data: null,
       );
     }
+    final errorMessage =
+        lastDioError?.response?.data?['error']?['message'] ??
+        lastDioError?.message ??
+        'Unknown error';
+    return AIResponse(
+      success: false,
+      message: 'Gemini API error: $errorMessage',
+      data: null,
+    );
   }
 
   Future<AIResponse> askQuestion({
@@ -98,7 +107,7 @@ class AIService {
     String? docType,
     String? preferredFormat,
     String? additionalContext, // NEW
-    String model = 'gemini-1.5-flash-latest', // NEW
+    String model = kDefaultGeminiModel,
     bool rawMode = false, // kept (currently informational)
   }) async {
     final prompt = buildPrompt(
@@ -123,7 +132,7 @@ class AIService {
     String? userRole,
     String? docType,
     String? preferredFormat,
-    String model = 'gemini-1.5-flash-latest', // ✅ New default
+    String model = kDefaultGeminiModel,
   }) async {
     final prompt = buildPrompt(
       task: 'Analyze the file and provide insights',
@@ -146,7 +155,7 @@ class AIService {
     String? docType,
     String? preferredFormat,
     String? additionalContext,
-    String model = 'gemini-1.5-flash-latest', // ✅ New default
+    String model = kDefaultGeminiModel,
   }) async {
     final prompt = buildPrompt(
       task: 'Generate a comprehensive summary of this file',
@@ -166,7 +175,7 @@ class AIService {
   Future<String> sendPrompt(
     String prompt, {
     int maxTokens = 512,
-    String model = 'gemini-1.5-flash-latest',
+    String model = kDefaultGeminiModel,
   }) async {
     final text = await _fallback.generateContent(prompt, model: model);
     return text.trim();

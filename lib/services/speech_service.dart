@@ -17,6 +17,7 @@ class SpeechService extends ChangeNotifier {
   bool _isSpeaking = false;
   bool _isPaused = false;
   bool _ttsReady = false;
+  VoidCallback? _pendingOnComplete;
 
   final SpeechToText _speechToText = SpeechToText();
   bool _isListening = false;
@@ -53,6 +54,12 @@ class SpeechService extends ChangeNotifier {
     _flutterTts.setCompletionHandler(() {
       _isSpeaking = false;
       _isPaused = false;
+      // Fire any pending onComplete callback for the last speak()
+      try {
+        _pendingOnComplete?.call();
+      } finally {
+        _pendingOnComplete = null;
+      }
       notifyListeners();
     });
 
@@ -67,9 +74,9 @@ class SpeechService extends ChangeNotifier {
   Future<void> speak(String text, {VoidCallback? onComplete}) async {
     if (text.isNotEmpty) {
       if (!_ttsReady) await _initializeTts();
+      _pendingOnComplete = onComplete;
       await _flutterTts.speak(text);
     }
-    onComplete?.call();
   }
 
   Future<void> speakText(String text) async {
@@ -90,6 +97,23 @@ class SpeechService extends ChangeNotifier {
     await _flutterTts.pause();
     _isPaused = true;
     notifyListeners();
+  }
+
+  // Best-effort resume: supported on some platforms; if unavailable, callers
+  // should re-invoke speak(text) from their own stored source.
+  Future<bool> resume() async {
+    try {
+      // This may throw on platforms where resume isn't implemented.
+      // ignore: invalid_use_of_visible_for_testing_member, invalid_use_of_protected_member
+      final r = await (_flutterTts as dynamic).resume();
+      // Some platforms return 1/true on success; treat non-null as success
+      _isPaused = false;
+      _isSpeaking = true;
+      notifyListeners();
+      return r != null ? true : true;
+    } catch (_) {
+      return false; // Caller should fallback to re-speak from the beginning.
+    }
   }
 
   Future<void> _initializeStt() async {

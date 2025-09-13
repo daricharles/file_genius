@@ -9,6 +9,7 @@ import 'file_viewer.dart';
 import 'services/file_content_extractor.dart';
 import 'widgets/enhanced_ai_chat_widget.dart';
 import 'services/speech_service.dart';
+import 'services/tts_coordinator.dart';
 
 class MainPane extends StatefulWidget {
   const MainPane({
@@ -43,13 +44,26 @@ class _MainPaneState extends State<MainPane> {
   Future<String>? _fileContentFuture;
   String? _fileContentFutureKey;
   final Set<String> _autoSummarized = {}; // now used
-  final SpeechService _speechService = SpeechService(); // TTS service
-  bool _fileTtsPaused = false; // track pause state for file-preview TTS
+  final SpeechService _speechService = SpeechService(); // shared TTS engine
+  bool _fileTtsPlaying = false; // file-preview TTS UI state
+  bool _fileTtsPaused = false; // file-preview pause state
 
   @override
   void initState() {
     super.initState();
     _prepareFileContentFuture(); // initialize if previewFile already set
+    // Reset local file TTS UI state if another source becomes active
+    TtsCoordinator.instance.addListener(() {
+      if (!mounted) return;
+      if (TtsCoordinator.instance.activeSource != TtsSource.filePreview) {
+        if (_fileTtsPlaying || _fileTtsPaused) {
+          setState(() {
+            _fileTtsPlaying = false;
+            _fileTtsPaused = false;
+          });
+        }
+      }
+    });
   }
 
   @override
@@ -133,44 +147,73 @@ class _MainPaneState extends State<MainPane> {
         await _speechService.initialize();
       }
 
-      // If currently speaking, toggle pause/resume
-      if (_speechService.isSpeaking) {
+      // If another source (e.g., chat) is currently active, treat this as a fresh start
+      if (TtsCoordinator.instance.activeSource != null &&
+          TtsCoordinator.instance.activeSource != TtsSource.filePreview) {
+        await _speechService.stop();
+        _fileTtsPlaying = false;
+        _fileTtsPaused = false;
+      }
+
+      // If currently speaking (this pane), toggle pause/resume
+      if (_fileTtsPlaying) {
         if (_fileTtsPaused) {
-          // Try resume; fallback to speak if resume isn't supported
-          try {
-            await (_speechService as dynamic).resume();
-          } catch (_) {
-            // No resume API; fall back to restarting (best-effort)
-            if (_fileContentFuture != null) {
-              final String content = await _fileContentFuture!;
-              await _speechService.speak(content);
+          // Try resume; fallback to re-speak if resume isn't supported
+          final resumed = await _speechService.resume();
+          if (!resumed) {
+            String content = '';
+            if (widget.previewFile?.extractedText?.trim().isNotEmpty == true) {
+              content = widget.previewFile!.extractedText!.trim();
+            } else if (_fileContentFuture != null) {
+              content = (await _fileContentFuture!).trim();
+            }
+            if (content.isNotEmpty) {
+              await _speechService.stop();
+              TtsCoordinator.instance.setActive(source: TtsSource.filePreview);
+              await _speechService.speak(
+                content,
+                onComplete: () {
+                  if (!mounted) return;
+                  setState(() {
+                    _fileTtsPaused = false;
+                    _fileTtsPlaying = false;
+                  });
+                  TtsCoordinator.instance.clearIfMatches(
+                    source: TtsSource.filePreview,
+                  );
+                },
+              );
             }
           }
-          if (mounted) setState(() => _fileTtsPaused = false);
+          if (mounted)
+            setState(() {
+              _fileTtsPaused = false;
+              _fileTtsPlaying = true;
+            });
           return;
         } else {
           // Try pause; fallback to stop if pause isn't supported
           try {
-            await (_speechService as dynamic).pause();
+            await _speechService.pause();
           } catch (_) {
             await _speechService.stop();
           }
-          if (mounted) setState(() => _fileTtsPaused = true);
+          if (mounted)
+            setState(() {
+              _fileTtsPaused = true;
+              _fileTtsPlaying = true;
+            });
           return;
         }
       }
 
-      // Start fresh
-      if (_fileContentFuture == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No readable content found in file')),
-          );
-        }
-        return;
+      // Start fresh: prefer already analyzed extractedText, else await extraction future
+      String content = '';
+      if (widget.previewFile?.extractedText?.trim().isNotEmpty == true) {
+        content = widget.previewFile!.extractedText!.trim();
+      } else if (_fileContentFuture != null) {
+        content = (await _fileContentFuture!).trim();
       }
-
-      final String content = await _fileContentFuture!;
       if (content.trim().isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -180,16 +223,24 @@ class _MainPaneState extends State<MainPane> {
         return;
       }
 
+      // Mark coordinator
+      TtsCoordinator.instance.setActive(source: TtsSource.filePreview);
       await _speechService.speak(
         content,
         onComplete: () {
           if (!mounted) return;
           setState(() {
             _fileTtsPaused = false;
+            _fileTtsPlaying = false;
           });
+          TtsCoordinator.instance.clearIfMatches(source: TtsSource.filePreview);
         },
       );
-      if (mounted) setState(() => _fileTtsPaused = false);
+      if (mounted)
+        setState(() {
+          _fileTtsPaused = false;
+          _fileTtsPlaying = true;
+        });
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -256,28 +307,32 @@ class _MainPaneState extends State<MainPane> {
                       ),
                       // Add TTS icon next to existing Download/Delete actions
                       ListenableBuilder(
-                        listenable: _speechService,
-                        builder:
-                            (_, _) => IconButton(
-                              tooltip:
-                                  _speechService.isSpeaking
-                                      ? (_fileTtsPaused
-                                          ? 'Resume reading'
-                                          : 'Pause reading')
-                                      : 'Read aloud',
-                              icon: Icon(
-                                _speechService.isSpeaking
-                                    ? (_fileTtsPaused
-                                        ? Icons.play_arrow
-                                        : Icons.pause)
-                                    : Icons.volume_up,
-                                color:
-                                    _speechService.isSpeaking && !_fileTtsPaused
-                                        ? Colors.redAccent
-                                        : Theme.of(context).iconTheme.color,
-                              ),
-                              onPressed: _toggleFileTts,
+                        listenable: TtsCoordinator.instance,
+                        builder: (_, __) {
+                          final isThisPlaying =
+                              _fileTtsPlaying &&
+                              TtsCoordinator.instance.activeSource ==
+                                  TtsSource.filePreview;
+                          final isPaused = _fileTtsPaused && isThisPlaying;
+                          return IconButton(
+                            tooltip:
+                                isThisPlaying
+                                    ? (isPaused
+                                        ? 'Resume reading'
+                                        : 'Pause reading')
+                                    : 'Read aloud',
+                            icon: Icon(
+                              isThisPlaying
+                                  ? (isPaused ? Icons.play_arrow : Icons.pause)
+                                  : Icons.volume_up,
+                              color:
+                                  isThisPlaying && !isPaused
+                                      ? Colors.redAccent
+                                      : Theme.of(context).iconTheme.color,
                             ),
+                            onPressed: _toggleFileTts,
+                          );
+                        },
                       ),
                       // Delete icon
                       IconButton(

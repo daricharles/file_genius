@@ -10,6 +10,7 @@ import '../services/ai_service.dart';
 import '../services/conversation_manager.dart';
 import '../models/chat_models.dart';
 import '../services/speech_service.dart';
+import '../services/tts_coordinator.dart';
 
 class EnhancedAIChatWidget extends StatefulWidget {
   final String fileName;
@@ -45,7 +46,9 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   final ConversationManager _conversationManager = ConversationManager.instance;
   final Uuid _uuid = const Uuid();
   final SpeechService _speechService = SpeechService();
-  bool _ttsPaused = false; // track pause state for AI TTS
+  // Chat TTS UI state: which message is speaking and whether it's paused
+  String? _speakingMessageId;
+  bool _chatTtsPaused = false;
 
   ChatSession? _currentSession;
   bool _isLoading = false;
@@ -69,6 +72,18 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
     _initializeAnimations();
     _initializeChat();
     _initializeSpeechService();
+    // Reset chat TTS UI when another source (file preview) takes over
+    TtsCoordinator.instance.addListener(() {
+      if (!mounted) return;
+      final active = TtsCoordinator.instance.activeSource;
+      if (active != TtsSource.chat &&
+          (_speakingMessageId != null || _chatTtsPaused)) {
+        setState(() {
+          _speakingMessageId = null;
+          _chatTtsPaused = false;
+        });
+      }
+    });
   }
 
   Future<void> _runAutoSummary() async {
@@ -328,7 +343,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
           timestamp: DateTime.now(),
           messageType: 'response',
           metadata: {
-            'model': response.data?['model'] ?? 'gemini-1.5-flash-latest',
+            'model': response.data?['model'] ?? 'gemini-1.5-pro-latest',
             'prompt_tokens': response.data?['prompt_tokens'],
             'completion_tokens': response.data?['completion_tokens'],
           },
@@ -981,78 +996,117 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                       const SizedBox(width: 4),
                       if (_isSpeechServiceInitialized)
                         ListenableBuilder(
-                          listenable: _speechService,
-                          builder:
-                              (_, _) => IconButton(
-                                icon: Icon(
-                                  _speechService.isSpeaking
-                                      ? (_ttsPaused
-                                          ? Icons.play_arrow
-                                          : Icons.pause)
-                                      : Icons.volume_up,
-                                ),
-                                onPressed: () async {
-                                  try {
-                                    if (_speechService.isSpeaking) {
-                                      if (_ttsPaused) {
-                                        // resume
-                                        try {
-                                          await (_speechService as dynamic)
-                                              .resume();
-                                        } catch (_) {
-                                          // fallback: speak from start
-                                          await _speechService.speak(
-                                            message.text,
-                                            onComplete: () {
-                                              if (!mounted) return;
-                                              setState(
-                                                () => _ttsPaused = false,
-                                              );
-                                            },
-                                          );
-                                        }
-                                        if (mounted) {
-                                          setState(() => _ttsPaused = false);
-                                        }
-                                      } else {
-                                        // pause
-                                        try {
-                                          await (_speechService as dynamic)
-                                              .pause();
-                                        } catch (_) {
-                                          await _speechService.stop();
-                                        }
-                                        if (mounted) {
-                                          setState(() => _ttsPaused = true);
-                                        }
+                          listenable: TtsCoordinator.instance,
+                          builder: (_, __) {
+                            final isThisSpeaking =
+                                _speakingMessageId == message.id &&
+                                TtsCoordinator.instance.activeSource ==
+                                    TtsSource.chat &&
+                                TtsCoordinator.instance.activeMessageId ==
+                                    message.id;
+                            final isPaused = isThisSpeaking && _chatTtsPaused;
+                            return IconButton(
+                              icon: Icon(
+                                isThisSpeaking
+                                    ? (isPaused
+                                        ? Icons.play_arrow
+                                        : Icons.pause)
+                                    : Icons.volume_up,
+                              ),
+                              onPressed: () async {
+                                try {
+                                  // If tapping the same message that's currently speaking
+                                  if (_speakingMessageId == message.id &&
+                                      TtsCoordinator.instance.activeSource ==
+                                          TtsSource.chat) {
+                                    if (_chatTtsPaused) {
+                                      final ok = await _speechService.resume();
+                                      if (!ok) {
+                                        await _speechService.stop();
+                                        TtsCoordinator.instance.setActive(
+                                          source: TtsSource.chat,
+                                          messageId: message.id,
+                                        );
+                                        await _speechService.speak(
+                                          message.text,
+                                          onComplete: () {
+                                            if (!mounted) return;
+                                            setState(() {
+                                              _speakingMessageId = null;
+                                              _chatTtsPaused = false;
+                                            });
+                                            TtsCoordinator.instance
+                                                .clearIfMatches(
+                                                  source: TtsSource.chat,
+                                                  messageId: message.id,
+                                                );
+                                          },
+                                        );
                                       }
+                                      if (mounted)
+                                        setState(() => _chatTtsPaused = false);
                                     } else {
-                                      // start fresh
-                                      await _speechService.speak(
-                                        message.text,
-                                        onComplete: () {
-                                          if (!mounted) return;
-                                          setState(() => _ttsPaused = false);
-                                        },
-                                      );
-                                      if (mounted) {
-                                        setState(() => _ttsPaused = false);
+                                      try {
+                                        await _speechService.pause();
+                                        if (mounted)
+                                          setState(() => _chatTtsPaused = true);
+                                      } catch (_) {
+                                        await _speechService.stop();
+                                        if (mounted)
+                                          setState(() {
+                                            _chatTtsPaused = false;
+                                            _speakingMessageId = null;
+                                          });
                                       }
                                     }
-                                  } catch (e) {
-                                    if (!mounted) return;
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('TTS failed: $e')),
-                                    );
+                                    return;
                                   }
-                                },
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                                tooltip:
-                                    _speechService.isSpeaking
-                                        ? (_ttsPaused ? 'Resume' : 'Pause')
-                                        : 'Read aloud',
-                              ),
+
+                                  // Otherwise, start playing this message anew
+                                  if (TtsCoordinator.instance.activeSource !=
+                                          null &&
+                                      TtsCoordinator.instance.activeSource !=
+                                          TtsSource.chat) {
+                                    await _speechService.stop();
+                                  }
+                                  _speakingMessageId = message.id;
+                                  _chatTtsPaused = false;
+                                  setState(() {});
+                                  await _speechService.stop();
+                                  // Mark coordinator for chat
+                                  TtsCoordinator.instance.setActive(
+                                    source: TtsSource.chat,
+                                    messageId: message.id,
+                                  );
+                                  await _speechService.speak(
+                                    message.text,
+                                    onComplete: () {
+                                      if (!mounted) return;
+                                      setState(() {
+                                        _speakingMessageId = null;
+                                        _chatTtsPaused = false;
+                                      });
+                                      TtsCoordinator.instance.clearIfMatches(
+                                        source: TtsSource.chat,
+                                        messageId: message.id,
+                                      );
+                                    },
+                                  );
+                                } catch (e) {
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('TTS failed: $e')),
+                                  );
+                                }
+                              },
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              tooltip:
+                                  isThisSpeaking
+                                      ? (isPaused ? 'Resume' : 'Pause')
+                                      : 'Read aloud',
+                            );
+                          },
                         ),
                     ],
                   ),

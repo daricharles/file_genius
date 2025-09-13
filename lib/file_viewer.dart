@@ -48,13 +48,11 @@ class _FileViewerState extends State<FileViewer> {
   }
 
   void _initializeContent() {
-    // Get text content for TTS
+    // Get text content for TTS: ensure this pane reads FILE content only (not AI summary)
     _fullText =
-        widget.file.summary?.isNotEmpty == true
-            ? widget.file.summary!
-            : (widget.file.extractedText?.isNotEmpty == true
-                ? widget.file.extractedText!
-                : ''); // removed placeholder text
+        widget.file.extractedText?.isNotEmpty == true
+            ? widget.file.extractedText!
+            : '';
 
     _words = _fullText.trim().isEmpty ? [] : _fullText.split(RegExp(r'\s+'));
     _generateTextSpans();
