@@ -25,13 +25,17 @@ const officeparser = require('officeparser');
 
 app.post('/gemini', async (req, res) => {
   try {
+    const model = req.body?.model || 'gemini-1.5-pro-latest';
     const response = await axios.post(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
       req.body
     );
     res.json(response.data);
   } catch (err) {
-    res.status(err.response?.status || 500).json({ error: err.message, data: err.response?.data });
+    const status = err.response?.status || 500;
+    const message = err.response?.data?.error?.message || err.message;
+    console.error(`[Proxy] Gemini error ${status}: ${message}`);
+    res.status(status).json({ error: message, data: err.response?.data });
   }
 });
 
