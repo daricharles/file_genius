@@ -1,4 +1,6 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, curly_braces_in_flow_control_structures
+
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,6 +13,7 @@ import '../services/conversation_manager.dart';
 import '../models/chat_models.dart';
 import '../services/speech_service.dart';
 import '../services/tts_coordinator.dart';
+import 'flashcard_widget.dart';
 
 class EnhancedAIChatWidget extends StatefulWidget {
   final String fileName;
@@ -20,6 +23,7 @@ class EnhancedAIChatWidget extends StatefulWidget {
   final String? fileId;
   final Map<String, dynamic>? fileMetadata; // stays
   final VoidCallback? onInteractionSuccess;
+  final void Function(bool isCorrect)? onQuizAnswerSubmitted;
   final bool autoSummarize;
 
   const EnhancedAIChatWidget({
@@ -31,6 +35,7 @@ class EnhancedAIChatWidget extends StatefulWidget {
     required this.fileId,
     this.fileMetadata, // <-- ADDED (initializes final field)
     this.onInteractionSuccess,
+    this.onQuizAnswerSubmitted,
     this.autoSummarize = false,
   });
 
@@ -336,32 +341,101 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
           return;
         }
 
-        final aiMessage = EnhancedChatMessage(
-          id: _uuid.v4(),
-          text: answer,
-          isUser: false,
-          timestamp: DateTime.now(),
-          messageType: 'response',
-          metadata: {
-            'model': response.data?['model'] ?? 'gemini-1.5-pro-latest',
-            'prompt_tokens': response.data?['prompt_tokens'],
-            'completion_tokens': response.data?['completion_tokens'],
-          },
-        );
+        // If this was a quiz request, try to parse JSON and store flashcards in metadata
+        if ((messageType ?? 'question') == 'quiz') {
+          final parsed = _tryParseQuizCards(answer);
+          if (parsed != null && parsed.isNotEmpty) {
+            final aiMessage = EnhancedChatMessage(
+              id: _uuid.v4(),
+              text:
+                  'Quiz generated: ${parsed.length} cards. Flip each card to view the answer.',
+              isUser: false,
+              timestamp: DateTime.now(),
+              messageType: 'quiz',
+              metadata: {
+                'model': response.data?['model'] ?? 'gemini-1.5-pro-latest',
+                'cards': parsed,
+                'prompt_tokens': response.data?['prompt_tokens'],
+                'completion_tokens': response.data?['completion_tokens'],
+              },
+            );
 
-        setState(() {
-          _currentSession!.messages.add(aiMessage);
-          _isLoading = false;
-          _aiTyping = false;
-        });
+            setState(() {
+              _currentSession!.messages.add(aiMessage);
+              _isLoading = false;
+              _aiTyping = false;
+            });
 
-        await _conversationManager.addMessage(
-          sessionId: _currentSession!.id,
-          message: aiMessage,
-        );
+            await _conversationManager.addMessage(
+              sessionId: _currentSession!.id,
+              message: aiMessage,
+            );
 
-        widget.onInteractionSuccess?.call();
-        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+            widget.onInteractionSuccess?.call();
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _scrollToBottom(),
+            );
+          } else {
+            // Fallback: show raw text but still as response
+            final aiMessage = EnhancedChatMessage(
+              id: _uuid.v4(),
+              text: answer,
+              isUser: false,
+              timestamp: DateTime.now(),
+              messageType: 'response',
+              metadata: {
+                'model': response.data?['model'] ?? 'gemini-1.5-pro-latest',
+                'prompt_tokens': response.data?['prompt_tokens'],
+                'completion_tokens': response.data?['completion_tokens'],
+              },
+            );
+
+            setState(() {
+              _currentSession!.messages.add(aiMessage);
+              _isLoading = false;
+              _aiTyping = false;
+            });
+
+            await _conversationManager.addMessage(
+              sessionId: _currentSession!.id,
+              message: aiMessage,
+            );
+
+            widget.onInteractionSuccess?.call();
+            WidgetsBinding.instance.addPostFrameCallback(
+              (_) => _scrollToBottom(),
+            );
+          }
+        } else {
+          final aiMessage = EnhancedChatMessage(
+            id: _uuid.v4(),
+            text: answer,
+            isUser: false,
+            timestamp: DateTime.now(),
+            messageType: 'response',
+            metadata: {
+              'model': response.data?['model'] ?? 'gemini-1.5-pro-latest',
+              'prompt_tokens': response.data?['prompt_tokens'],
+              'completion_tokens': response.data?['completion_tokens'],
+            },
+          );
+
+          setState(() {
+            _currentSession!.messages.add(aiMessage);
+            _isLoading = false;
+            _aiTyping = false;
+          });
+
+          await _conversationManager.addMessage(
+            sessionId: _currentSession!.id,
+            message: aiMessage,
+          );
+
+          widget.onInteractionSuccess?.call();
+          WidgetsBinding.instance.addPostFrameCallback(
+            (_) => _scrollToBottom(),
+          );
+        }
       } else {
         await _showErrorMessage(response.message);
       }
@@ -685,10 +759,36 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                 final count = raw.clamp(1, 50);
                 Navigator.pop(ctx);
 
-                // Send as a normal user message so it's persisted
-                final prompt =
-                    'Generate a $count-question $quizType quiz based on the file. '
-                    'Include the correct answers. Keep it relevant to the document.';
+                // Map to normalized types
+                final type = () {
+                  switch (quizType) {
+                    case 'MCQs':
+                      return 'mcq';
+                    case 'True/False':
+                      return 'true_false';
+                    case 'Fill-in-the-Blank':
+                      return 'fill_blank';
+                    default:
+                      return 'mcq';
+                  }
+                }();
+
+                // Strict JSON instruction. No markdown fences. No prose.
+                final prompt = [
+                  'You are generating a flashcard quiz strictly in JSON for study.',
+                  'Use ONLY this schema and return ONLY minified JSON with no markdown and no commentary:',
+                  '{"cards":[{"type":"mcq","question":"...","options":["...","..."],"answer":"...","explanation":"..."}]}',
+                  'Supported types: mcq | true_false | fill_blank.',
+                  'Requirements:',
+                  '- Create exactly $count cards of type $type.',
+                  '- Questions must be relevant to the provided document content.',
+                  '- Do NOT include answers inside the question text. Place them only in the answer field.',
+                  '- For mcq: include 4 options and set answer to one of the options.',
+                  '- For true_false: set answer to true or false (boolean).',
+                  '- For fill_blank: use a clear sentence with a blank and provide the correct answer.',
+                  'Return only: {"cards":[...]}',
+                ].join(' ');
+
                 await _sendMessage(prompt: prompt, messageType: 'quiz');
               },
               child: const Text('Generate'),
@@ -907,6 +1007,12 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                             ),
                           ),
 
+                      // Render flashcards for quiz messages
+                      if (!isUser && message.messageType == 'quiz') ...[
+                        const SizedBox(height: 12),
+                        _buildFlashcards(message.metadata?['cards']),
+                      ],
+
                       // Show follow-ups for summary messages
                       if (isSummary && _followUps.isNotEmpty) ...[
                         const SizedBox(height: 16),
@@ -997,7 +1103,7 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                       if (_isSpeechServiceInitialized)
                         ListenableBuilder(
                           listenable: TtsCoordinator.instance,
-                          builder: (_, __) {
+                          builder: (_, _) {
                             final isThisSpeaking =
                                 _speakingMessageId == message.id &&
                                 TtsCoordinator.instance.activeSource ==
@@ -1205,6 +1311,8 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
         return Icons.summarize;
       case 'analysis':
         return Icons.analytics;
+      case 'quiz':
+        return Icons.quiz;
       case 'quick action':
         return Icons.flash_on;
       case 'follow_up':
@@ -1214,6 +1322,125 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
       default:
         return Icons.chat;
     }
+  }
+
+  // Try to parse JSON array of cards from AI answer
+  List<Map<String, dynamic>>? _tryParseQuizCards(String raw) {
+    try {
+      // Extract first {...} block in case model sends prose or fences
+      final start = raw.indexOf('{');
+      final end = raw.lastIndexOf('}');
+      if (start == -1 || end == -1 || end <= start) return null;
+      final jsonStr = raw.substring(start, end + 1);
+      final Map<String, dynamic> decoded = json.decode(jsonStr);
+      final cards = decoded['cards'];
+      if (cards is List) {
+        // Normalize entries to map
+        return cards
+            .whereType<dynamic>()
+            .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Build a grid/column of flashcards using FlashcardWidget
+  Widget _buildFlashcards(dynamic cardsRaw) {
+    if (cardsRaw is! List) return const SizedBox.shrink();
+    final cards =
+        cardsRaw
+            .whereType<dynamic>()
+            .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e))
+            .toList();
+    if (cards.isEmpty) return const SizedBox.shrink();
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Simple responsive width
+        final maxWidth = constraints.maxWidth;
+        final crossAxisCount =
+            maxWidth > 900
+                ? 3
+                : maxWidth > 600
+                ? 2
+                : 1;
+        final itemWidth =
+            (maxWidth - (12 * (crossAxisCount - 1))) / crossAxisCount;
+
+        return Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children:
+              cards.asMap().entries.map((entry) {
+                final idx = entry.key;
+                final card = entry.value;
+                final type = (card['type'] ?? '').toString();
+                final q = (card['question'] ?? '').toString();
+                final explanation = (card['explanation'] ?? '').toString();
+                String question = q;
+                String answer;
+
+                switch (type) {
+                  case 'mcq':
+                    final options =
+                        (card['options'] as List?)
+                            ?.cast<dynamic>()
+                            .map((e) => e.toString())
+                            .toList() ??
+                        const <String>[];
+                    final ans = (card['answer'] ?? '').toString();
+                    final optsText =
+                        options.isEmpty
+                            ? ''
+                            : '\n\nOptions:\n${List.generate(options.length, (i) => '${String.fromCharCode(65 + i)}. ${options[i]}').join('\n')}';
+                    question = q + optsText;
+                    answer =
+                        'Answer: $ans${explanation.isNotEmpty ? '\n\n$explanation' : ''}';
+                    break;
+                  case 'true_false':
+                    final ansRaw = card['answer'];
+                    final boolAns =
+                        (ansRaw is bool)
+                            ? ansRaw
+                            : ansRaw.toString().toLowerCase().trim() == 'true';
+                    answer =
+                        'Answer: ${boolAns ? 'True' : 'False'}${explanation.isNotEmpty ? '\n\n$explanation' : ''}';
+                    break;
+                  case 'fill_blank':
+                  case 'fill-in-the-blank':
+                    final ans = (card['answer'] ?? '').toString();
+                    answer =
+                        'Answer: $ans${explanation.isNotEmpty ? '\n\n$explanation' : ''}';
+                    break;
+                  default:
+                    final ans = (card['answer'] ?? '').toString();
+                    answer =
+                        'Answer: $ans${explanation.isNotEmpty ? '\n\n$explanation' : ''}';
+                }
+
+                return SizedBox(
+                  width: itemWidth,
+                  child: FlashcardWidget(
+                    question: question,
+                    answer: answer,
+                    index: idx,
+                    type: type,
+                    options:
+                        (card['options'] as List?)
+                            ?.map((e) => e.toString())
+                            .toList(),
+                    onAnswered: (isCorrect) {
+                      widget.onQuizAnswerSubmitted?.call(isCorrect);
+                    },
+                  ),
+                );
+              }).toList(),
+        );
+      },
+    );
   }
 
   String _formatTime(DateTime ts) {

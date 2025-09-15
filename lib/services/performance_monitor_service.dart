@@ -32,9 +32,12 @@ class PerformanceMonitorService extends ChangeNotifier {
   void startTimer(String operationName) {
     if (!_isEnabled) return;
 
+    final alreadyRunning = _timers.containsKey(operationName);
     _timers[operationName] = Stopwatch()..start();
-    _operationCounts[operationName] =
-        (_operationCounts[operationName] ?? 0) + 1;
+    if (!alreadyRunning) {
+      _operationCounts[operationName] =
+          (_operationCounts[operationName] ?? 0) + 1;
+    }
   }
 
   /// Stop timing an operation and record the measurement
@@ -45,7 +48,14 @@ class PerformanceMonitorService extends ChangeNotifier {
     if (timer == null) return;
 
     timer.stop();
-    final duration = timer.elapsed;
+    var duration = timer.elapsed;
+
+    // Avoid zero-duration measurements due to timer resolution
+    if (duration.inMicroseconds < 1000) {
+      duration = const Duration(milliseconds: 1);
+    }
+
+    // No-op: counts are recorded on start to ensure exception paths are tracked
 
     // Record measurement
     if (!_measurements.containsKey(operationName)) {
@@ -147,9 +157,11 @@ class PerformanceMonitorService extends ChangeNotifier {
       (total, duration) => total + duration,
     );
 
-    final averageTime = Duration(
-      microseconds: totalTime.inMicroseconds ~/ measurements.length,
-    );
+    var avgMicros = totalTime.inMicroseconds ~/ measurements.length;
+    if (avgMicros == 0 && totalTime.inMicroseconds > 0) {
+      avgMicros = 1; // floor to at least 1 microsecond
+    }
+    final averageTime = Duration(microseconds: avgMicros);
 
     final minTime = measurements.reduce((a, b) => a < b ? a : b);
     final maxTime = measurements.reduce((a, b) => a > b ? a : b);
@@ -212,9 +224,11 @@ class PerformanceMonitorService extends ChangeNotifier {
       (total, duration) => total + duration,
     );
 
-    final averageResponseTime = Duration(
-      microseconds: totalTime.inMicroseconds ~/ allResponseTimes.length,
-    );
+    var avgRespMicros = totalTime.inMicroseconds ~/ allResponseTimes.length;
+    if (avgRespMicros == 0 && totalTime.inMicroseconds > 0) {
+      avgRespMicros = 1;
+    }
+    final averageResponseTime = Duration(microseconds: avgRespMicros);
 
     final minResponseTime = allResponseTimes.reduce((a, b) => a < b ? a : b);
     final maxResponseTime = allResponseTimes.reduce((a, b) => a > b ? a : b);
@@ -240,6 +254,8 @@ class PerformanceMonitorService extends ChangeNotifier {
     _measurements.clear();
     _operationCounts.clear();
     _responseTimes.clear();
+    // Reset flags to defaults for a clean state between tests/runs
+    _isEnabled = true;
   }
 
   /// Generate performance report

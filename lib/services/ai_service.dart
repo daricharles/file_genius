@@ -286,14 +286,14 @@ class GeminiHttpFallback {
     String prompt, {
     String model = 'gemini-1.5-flash-latest',
   }) async {
-    // Corrected endpoint to use v1beta
-    final endpoint =
-        'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey';
+    // Route all requests through local proxy to avoid exposing API key in client
+    final endpoint = 'http://localhost:3000/gemini';
 
     final dio = Dio();
     final response = await dio.post(
       endpoint,
       data: {
+        'model': model,
         'contents': [
           {
             'parts': [

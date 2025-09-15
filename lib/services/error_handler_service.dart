@@ -8,11 +8,12 @@ class ErrorHandlerService {
 
   /// Get user-friendly error message
   String getUserFriendlyMessage(dynamic error, {String? context}) {
-    if (error is String) {
-      return _getMessageFromString(error, context);
-    }
-
+    // Normalize to string for robust matching
     final errorString = error.toString().toLowerCase();
+
+    // Handle common string-form messages first
+    final stringMatch = _getMessageFromString(errorString, context);
+    if (stringMatch != null) return stringMatch;
 
     // Firebase Auth errors
     if (errorString.contains('user-not-found')) {
@@ -41,10 +42,12 @@ class ErrorHandlerService {
     if (errorString.contains('permission-denied')) {
       return 'Permission denied. Please check your account access.';
     }
-    if (errorString.contains('not-found')) {
+    if (errorString.contains('not-found') ||
+        errorString.contains('not found')) {
       return 'File or folder not found. It may have been deleted.';
     }
-    if (errorString.contains('already-exists')) {
+    if (errorString.contains('already-exists') ||
+        errorString.contains('already exists')) {
       return 'A file with this name already exists. Please choose a different name.';
     }
     if (errorString.contains('quota-exceeded')) {
@@ -78,7 +81,7 @@ class ErrorHandlerService {
   }
 
   /// Get error message from string
-  String _getMessageFromString(String error, String? context) {
+  String? _getMessageFromString(String error, String? context) {
     final lowerError = error.toLowerCase();
 
     if (lowerError.contains('failed to upload')) {
@@ -97,7 +100,7 @@ class ErrorHandlerService {
       return 'Failed to save changes. Please try again.';
     }
 
-    return _getDefaultMessage(context);
+    return null; // Let caller decide default
   }
 
   /// Get default error message
@@ -121,7 +124,8 @@ class ErrorHandlerService {
     if (errorString.contains('quota') || errorString.contains('exceeded')) {
       return Icons.storage;
     }
-    if (errorString.contains('not-found')) {
+    if (errorString.contains('not-found') ||
+        errorString.contains('not found')) {
       return Icons.search_off;
     }
 
@@ -255,5 +259,3 @@ class ErrorHandlerService {
     );
   }
 }
-
-

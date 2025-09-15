@@ -1,4 +1,4 @@
-// ignore_for_file: deprecated_member_use
+// ignore_for_file: deprecated_member_use, curly_braces_in_flow_control_structures
 
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -23,6 +23,7 @@ class MainPane extends StatefulWidget {
     this.onSelectFile,
     this.onDeleteFile,
     this.onAIInteractionSuccess,
+    this.onQuizAnswerSubmitted,
   });
 
   final Folder? selectedFolder;
@@ -34,6 +35,7 @@ class MainPane extends StatefulWidget {
   final void Function(FileMeta? file)? onSelectFile;
   final void Function(FileMeta file)? onDeleteFile;
   final VoidCallback? onAIInteractionSuccess;
+  final void Function(bool isCorrect)? onQuizAnswerSubmitted;
 
   @override
   State<MainPane> createState() => _MainPaneState();
@@ -308,7 +310,7 @@ class _MainPaneState extends State<MainPane> {
                       // Add TTS icon next to existing Download/Delete actions
                       ListenableBuilder(
                         listenable: TtsCoordinator.instance,
-                        builder: (_, __) {
+                        builder: (_, _) {
                           final isThisPlaying =
                               _fileTtsPlaying &&
                               TtsCoordinator.instance.activeSource ==
@@ -468,6 +470,7 @@ class _MainPaneState extends State<MainPane> {
                           autoSummarize:
                               true, // Always allow auto-summary, widget will handle if it should run
                           onInteractionSuccess: widget.onAIInteractionSuccess,
+                          onQuizAnswerSubmitted: widget.onQuizAnswerSubmitted,
                         );
                       },
                     ),

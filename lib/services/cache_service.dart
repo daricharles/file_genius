@@ -10,6 +10,9 @@ class CacheService<T> {
 
   /// Get item from cache
   T? get(String key) {
+    // Always cleanup expired items first to keep cache consistent
+    _cleanupExpired();
+
     final item = _cache[key];
     if (item == null) return null;
 
@@ -38,6 +41,9 @@ class CacheService<T> {
 
   /// Check if key exists in cache
   bool contains(String key) {
+    // Keep cache tidy on contains checks as well
+    _cleanupExpired();
+
     final item = _cache[key];
     if (item == null) return false;
 
@@ -79,21 +85,25 @@ class CacheService<T> {
   void _removeLeastRecentlyUsed() {
     if (_cache.isEmpty) return;
 
-    // Sort by last accessed time and remove oldest
-    final sortedEntries =
-        _cache.entries.toList()..sort(
-          (a, b) => a.value.lastAccessed.compareTo(b.value.lastAccessed),
-        );
-
-    // Remove 20% of oldest items
-    final removeCount = (_cache.length * 0.2).ceil();
-    for (int i = 0; i < removeCount && i < sortedEntries.length; i++) {
-      _cache.remove(sortedEntries[i].key);
+    // Find the single least recently used entry deterministically
+    String? lruKey;
+    DateTime? oldest;
+    _cache.forEach((key, value) {
+      if (oldest == null || value.lastAccessed.isBefore(oldest!)) {
+        oldest = value.lastAccessed;
+        lruKey = key;
+      }
+    });
+    if (lruKey != null) {
+      _cache.remove(lruKey);
     }
   }
 
   /// Get cache statistics
   CacheStats getStats() {
+    // Ensure stats don't count expired entries
+    _cleanupExpired();
+
     int expired = 0;
     int valid = 0;
     DateTime? oldestAccess;

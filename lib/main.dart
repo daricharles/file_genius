@@ -1123,6 +1123,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               }),
           onDeleteFile: _handleDeleteFile,
           onAIInteractionSuccess: onAIInteractionSuccess,
+          onQuizAnswerSubmitted: onQuizAnswerSubmitted,
         );
       } else if (_selectedFolder != null) {
         // Leaving file view -> end session
@@ -1141,6 +1142,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               }),
           onDeleteFile: _handleDeleteFile,
           onAIInteractionSuccess: onAIInteractionSuccess,
+          onQuizAnswerSubmitted: onQuizAnswerSubmitted,
         );
       } else {
         _endStudySession(flush: true);
@@ -1158,6 +1160,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               }),
           onDeleteFile: _handleDeleteFile,
           onAIInteractionSuccess: onAIInteractionSuccess,
+          onQuizAnswerSubmitted: onQuizAnswerSubmitted,
         );
       }
 
