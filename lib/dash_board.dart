@@ -7,6 +7,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart'; // Import Firestore
 import 'constants.dart';
 import 'screens/chat_sessions_screen.dart';
+import 'widgets/app_footer.dart';
 
 /// Comprehensive Dashboard with Gamification & Analytics
 class DashboardScreen extends StatefulWidget {
@@ -371,6 +372,8 @@ class DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    final isMobile = width < 700;
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
       body: RefreshIndicator(
@@ -390,31 +393,46 @@ class DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 24),
                 _buildMainMetrics(),
                 const SizedBox(height: 24),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      flex: 2,
-                      child: Column(
-                        children: [
-                          _buildBadgeSystem(),
-                          const SizedBox(height: 24),
-                          _buildActivityGraph(),
-                        ],
+                // Responsive reordering: on mobile, stack sections vertically as requested
+                if (isMobile) ...[
+                  // 1) Streak card
+                  _buildStreakCard(),
+                  const SizedBox(height: 24),
+                  // 2) Achievement badges
+                  _buildBadgeSystem(),
+                  const SizedBox(height: 24),
+                  // 3) Activity heatmap
+                  _buildActivityGraph(),
+                  const SizedBox(height: 24),
+                  // 4) Quick actions
+                  _buildQuickActions(),
+                ] else ...[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Column(
+                          children: [
+                            _buildBadgeSystem(),
+                            const SizedBox(height: 24),
+                            _buildActivityGraph(),
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 24),
-                    Expanded(
-                      child: Column(
-                        children: [
-                          _buildStreakCard(),
-                          const SizedBox(height: 24),
-                          _buildQuickActions(),
-                        ],
+                      const SizedBox(width: 24),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            _buildStreakCard(),
+                            const SizedBox(height: 24),
+                            _buildQuickActions(),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 24),
                 _buildAnalyticsSection(),
                 const SizedBox(height: 24),
@@ -422,7 +440,7 @@ class DashboardScreenState extends State<DashboardScreen> {
                 const SizedBox(height: 24),
                 _buildDailyQuote(),
                 const SizedBox(height: 32),
-                _buildFooter(context),
+                const AppFooter(),
               ],
             ],
           ),
@@ -472,6 +490,8 @@ class DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildHeader(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    final isMobile = width < 700;
     // Get current date and day
     final now = DateTime.now();
     final dayNames = [
@@ -502,6 +522,104 @@ class DashboardScreenState extends State<DashboardScreen> {
     final currentDate =
         '${_getOrdinalSuffix(now.day)} ${monthNames[now.month - 1]} ${now.year}';
 
+    if (isMobile) {
+      // Mobile: vertical stack
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Title row with back button
+          Row(
+            children: [
+              IconButton(
+                icon: const Icon(
+                  Icons.arrow_back,
+                  color: Colors.black87,
+                  size: 28,
+                ),
+                onPressed: () => widget.onBackPressed?.call(),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Dashboard',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Welcome, $_userName!',
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Your learning journey at a glance',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      currentDay,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    Text(
+                      currentDate,
+                      style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [kBrand, kBrand.withOpacity(0.8)],
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.stars, color: Colors.white, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      '$_totalPoints XP',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    // Desktop/tablet: original header
     return Column(
       children: [
         // Dashboard title row
@@ -1284,6 +1402,8 @@ class DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildAnalyticsSection() {
+    final width = MediaQuery.of(context).size.width;
+    final isMobile = width < 700;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -1306,32 +1426,43 @@ class DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 20),
 
-          // Study time breakdown
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Left: Study time chart
-              Expanded(flex: 2, child: _buildStudyTimeChart()),
-              const SizedBox(width: 24),
-              // Right: Weekly performance
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Weekly Activity',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+          // Study time breakdown — mobile first: Study Time, then Weekly Activity
+          if (isMobile) ...[
+            _buildStudyTimeChart(),
+            const SizedBox(height: 16),
+            const Text(
+              'Weekly Activity',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            _buildWeeklyActivityChart(),
+          ] else ...[
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Left: Study time chart
+                Expanded(flex: 2, child: _buildStudyTimeChart()),
+                const SizedBox(width: 24),
+                // Right: Weekly performance
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Weekly Activity',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                    _buildCustomBarChart(),
-                  ],
+                      const SizedBox(height: 12),
+                      _buildWeeklyActivityChart(),
+                    ],
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
 
           const SizedBox(height: 16),
           const Divider(),
@@ -1342,6 +1473,8 @@ class DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildStudyTimeChart() {
+    final width = MediaQuery.of(context).size.width;
+    final isMobile = width < 700;
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -1362,21 +1495,31 @@ class DashboardScreenState extends State<DashboardScreen> {
             children: [
               const Icon(Icons.schedule, color: Colors.blue, size: 20),
               const SizedBox(width: 8),
-              const Text(
-                'Study Time by Subject',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              Expanded(
+                child: Text(
+                  'Study Time by Subject',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: isMobile ? 16 : 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: EdgeInsets.symmetric(
+                  horizontal: isMobile ? 6 : 8,
+                  vertical: isMobile ? 3 : 4,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.blue.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
                   '${_totalStudyTime.toStringAsFixed(1)}h total',
-                  style: const TextStyle(
-                    fontSize: 12,
+                  style: TextStyle(
+                    fontSize: isMobile ? 11 : 12,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -1483,15 +1626,19 @@ class DashboardScreenState extends State<DashboardScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        subject,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                      Expanded(
+                        child: Text(
+                          subject,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
+                      const SizedBox(width: 8),
                       Text(
                         '${value.toStringAsFixed(1)}h',
                         style: TextStyle(fontSize: 12, color: Colors.grey[600]),
@@ -1520,6 +1667,105 @@ class DashboardScreenState extends State<DashboardScreen> {
               ),
             );
           }).toList(),
+    );
+  }
+
+  Widget _buildWeeklyActivityChart() {
+    // Expected keys: Mon..Sun or similar labels; handle empty gracefully
+    if (_weeklyPerformance.isEmpty) {
+      return Container(
+        height: 160,
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.show_chart, size: 40, color: Colors.grey[400]),
+              const SizedBox(height: 8),
+              Text(
+                'No weekly activity yet',
+                style: TextStyle(color: Colors.grey[600]),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final orderedDays = <String>[
+      'Mon',
+      'Tue',
+      'Wed',
+      'Thu',
+      'Fri',
+      'Sat',
+      'Sun',
+    ];
+    // Map keys may be full names; normalize common variants
+    int normalizeIndex(String k) {
+      final kk = k.substring(0, k.length < 3 ? k.length : 3).toLowerCase();
+      switch (kk) {
+        case 'mon':
+          return 0;
+        case 'tue':
+          return 1;
+        case 'wed':
+          return 2;
+        case 'thu':
+          return 3;
+        case 'fri':
+          return 4;
+        case 'sat':
+          return 5;
+        case 'sun':
+          return 6;
+        default:
+          return 0;
+      }
+    }
+
+    final entries =
+        _weeklyPerformance.entries.toList()..sort(
+          (a, b) => normalizeIndex(a.key).compareTo(normalizeIndex(b.key)),
+        );
+    final maxVal = entries
+        .map((e) => e.value)
+        .fold<int>(1, (m, v) => v > m ? v : m);
+
+    return SizedBox(
+      height: 160,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children:
+            entries.map((e) {
+              final dayShort = orderedDays[normalizeIndex(e.key)];
+              final h =
+                  (e.value / (maxVal == 0 ? 1 : maxVal)) * 120 +
+                  8; // min height 8
+              return Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Container(
+                      height: h,
+                      decoration: BoxDecoration(
+                        color: kBrand.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      dayShort,
+                      style: TextStyle(fontSize: 11, color: Colors.grey[700]),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+      ),
     );
   }
 
@@ -1701,67 +1947,7 @@ class DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildFooter(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 24),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        children: [
-          const Text(
-            'FileGenius Learning Platform',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _buildFooterItem(Icons.info_outline, 'About'),
-              _buildFooterItem(Icons.help_outline, 'Help'),
-              _buildFooterItem(Icons.privacy_tip, 'Privacy'),
-              _buildFooterItem(Icons.contact_support, 'Contact'),
-            ],
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'Version 1.0.0 • © ${DateTime.now().year} FileGenius',
-            style: TextStyle(color: Colors.grey[600], fontSize: 12),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFooterItem(IconData icon, String label) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: kBrand.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, color: kBrand, size: 20),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          label,
-          style: TextStyle(
-            color: Colors.grey[700],
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-          textAlign: TextAlign.center,
-        ),
-      ],
-    );
-  }
+  // Footer moved to widgets/app_footer.dart and reused across screens.
 
   List<Map<String, String>> _getDailyQuotes() {
     return [

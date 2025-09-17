@@ -374,9 +374,19 @@ class FileGeniusSidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Detect if we're inside a mobile Drawer and adjust behavior/width accordingly
+    final media = MediaQuery.of(context);
+    final isMobile = media.size.width < 700;
+    // Treat all mobile layouts as Drawer usage: keep sidebar expanded to avoid narrow width.
+    final inMobileDrawer = isMobile;
+
+    // In a mobile Drawer, always render expanded (not collapsed) to avoid very narrow width
+    final effectiveCollapsed = inMobileDrawer ? false : sidebarCollapsed;
+    final double effectiveWidth = effectiveCollapsed ? 56 : kSidebarW;
+
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
-      width: sidebarCollapsed ? 56 : kSidebarW,
+      width: effectiveWidth,
       color: Colors.grey.shade100,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -386,15 +396,28 @@ class FileGeniusSidebar extends StatelessWidget {
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
-                IconButton(
-                  icon: Icon(sidebarCollapsed ? Icons.menu : Icons.close),
-                  onPressed: onToggleSidebar,
-                ),
-                if (!sidebarCollapsed)
+                // Leading control: in mobile Drawer show a close button; else toggle collapse
+                if (inMobileDrawer)
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  )
+                else
+                  IconButton(
+                    icon: Icon(effectiveCollapsed ? Icons.menu : Icons.close),
+                    tooltip:
+                        effectiveCollapsed
+                            ? 'Expand sidebar'
+                            : 'Collapse sidebar',
+                    onPressed: onToggleSidebar,
+                  ),
+                if (!effectiveCollapsed)
                   const Text(
                     'FileGenius',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
+                if (!effectiveCollapsed) const Spacer(),
               ],
             ),
           ),

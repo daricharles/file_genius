@@ -291,6 +291,10 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   User? _user;
 
+  // Scaffold key and size-class tracking for responsive behavior
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  String _lastSizeClass = '';
+
   // State variables for user stats
   int _filesUploaded = 0;
   int _aiChatInteractions = 0;
@@ -324,6 +328,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _isUploading = false;
   double _uploadProgress = 0.0;
   String _loadingMessage = '';
+  bool _isDrawerOpen = false; // track drawer state for mobile
 
   // Enhanced Analytics for Phase 2
   int _weeklyUploads = 0;
@@ -1001,7 +1006,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (_, dims) {
-      final compact = dims.maxWidth < 700;
+      final width = dims.maxWidth;
+      final compact = width < 700; // mobile
+      final tablet = width >= 700 && width < 1024;
+      final sizeClass =
+          compact
+              ? 'mobile'
+              : tablet
+              ? 'tablet'
+              : 'desktop';
+
+      // On entering tablet class, auto-collapse sidebar once (user can expand)
+      if (_lastSizeClass != sizeClass) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (sizeClass == 'tablet') {
+            setState(() => _sidebarCollapsed = true);
+          }
+          _lastSizeClass = sizeClass;
+        });
+      }
 
       /* Sidebar */
       final sidebar = FileGeniusSidebar(
@@ -1167,7 +1191,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return Stack(
         children: [
           Scaffold(
+            key: _scaffoldKey,
             drawer: compact ? Drawer(child: sidebar) : null,
+            onDrawerChanged: (open) {
+              if (!compact) return; // only relevant on mobile
+              setState(() => _isDrawerOpen = open);
+            },
             body:
                 compact
                     ? content
@@ -1180,6 +1209,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
             floatingActionButton: null,
           ),
+          // Mobile: persistent expand button to open the drawer
+          if (compact && !_isDrawerOpen)
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Material(
+                    color: Colors.white,
+                    elevation: 2,
+                    shape: const CircleBorder(),
+                    child: IconButton(
+                      tooltip: 'Open sidebar',
+                      icon: const Icon(Icons.menu),
+                      onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           // Loading overlay
           if (_isLoading || _isUploading)
             Container(

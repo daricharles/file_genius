@@ -1,18 +1,3 @@
-// dragDropZone.dart
-//
-// Re‑usable drag‑and‑drop upload area.
-//
-// Requires:
-//   dotted_border: ^2.0.0
-//   file_picker   : ^6.0.0
-//
-// Usage example:
-//   DragDropZone(
-//     label: 'Drag & drop files or click to upload',
-//     onFilesPicked : _pickFiles,
-//     onFilesDropped: (List<PlatformFile> files) { … },
-//   );
-
 import 'package:dotted_border/dotted_border.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
