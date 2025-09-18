@@ -22,6 +22,29 @@ if (!GEMINI_API_KEY) {
 }
 const pptx2json = require('pptx2json');
 const officeparser = require('officeparser');
+const nodemailer = require('nodemailer');
+
+// Email transport (SMTP) configuration via environment variables
+// Supported env vars:
+// SMTP_HOST, SMTP_PORT, SMTP_SECURE ("true"/"false"), SMTP_USER, SMTP_PASS, FROM_EMAIL
+let mailerReady = false;
+let transporter = null;
+try {
+  const { SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS } = process.env;
+  if (SMTP_HOST && SMTP_PORT && SMTP_USER && SMTP_PASS) {
+    transporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: Number(SMTP_PORT),
+      secure: String(SMTP_SECURE || 'false') === 'true',
+      auth: { user: SMTP_USER, pass: SMTP_PASS },
+    });
+    mailerReady = true;
+  } else {
+    console.warn('[Email] SMTP env vars missing; email endpoint will 503.');
+  }
+} catch (e) {
+  console.error('[Email] Transport init failed:', e);
+}
 
 app.post('/gemini', async (req, res) => {
   try {
@@ -36,6 +59,26 @@ app.post('/gemini', async (req, res) => {
     const message = err.response?.data?.error?.message || err.message;
     console.error(`[Proxy] Gemini error ${status}: ${message}`);
     res.status(status).json({ error: message, data: err.response?.data });
+  }
+});
+
+// Email endpoint
+// Body: { to: string, subject: string, html?: string, text?: string }
+app.post('/send-email', async (req, res) => {
+  try {
+    if (!mailerReady || !transporter) {
+      return res.status(503).json({ error: 'Email service not configured' });
+    }
+    const { to, subject, html, text } = req.body || {};
+    if (!to || !subject || (!html && !text)) {
+      return res.status(400).json({ error: 'Missing to/subject/body' });
+    }
+    const fromEmail = process.env.FROM_EMAIL || 'no-reply@filegenius.local';
+    const info = await transporter.sendMail({ from: fromEmail, to, subject, html, text });
+    res.json({ ok: true, id: info.messageId });
+  } catch (err) {
+    console.error('[Email] Send failed:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 

@@ -40,6 +40,7 @@ import 'services/file_analysis_orchestrator.dart';
 import 'services/file_content_extractor.dart';
 import 'services/ai_service.dart';
 import 'services/question_suggestions_service.dart';
+import 'services/email_service.dart';
 
 /// Achievement notification dialog with animations
 class AchievementDialog extends StatefulWidget {
@@ -164,7 +165,7 @@ class _AchievementDialogState extends State<AchievementDialog>
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            '${widget.points} Total Points',
+                            '${widget.points} XP Earned',
                             style: const TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.w600,
@@ -338,10 +339,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // User data
   String _userName = 'User';
+  // Notification/email preferences
+  bool _prefLocalStudyReminders = true;
+  bool _prefLocalAchievements = true;
+  bool _prefLocalWeeklySummary = true;
+  bool _prefLocalDailyQuote = true;
+  bool _prefEmailAchievements = false;
+  bool _prefEmailWeeklySummary = false;
+  final EmailService _emailService = EmailService();
 
   // Last activity tracking
   DateTime? _lastActivityTime;
   Timer? _inactivityTimer;
+  Timer? _midnightRescheduleTimer;
 
   // User profile flag
   bool _showUserProfile = false;
@@ -358,6 +368,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Timer? _studyTickTimer;
   // ====================================
 
+  // === View persistence across refresh ===
+  static const String _kViewKey = 'fg.lastView';
+  static const String _kFolderKey = 'fg.lastFolderId';
+  static const String _kFileKey = 'fg.lastFileId';
+  Timer? _restoreTimer;
+  int _restoreTries = 0;
+  bool _restoreAttempted = false;
+  // ========================================
+
+  // Daily inspirational quotes pool (keep short and safe)
+  static const List<String> _dailyQuotes = [
+    'Believe you can and you’re halfway there.',
+    'Small steps every day lead to big results.',
+    'Your future is created by what you do today.',
+    'Dream big, start small, act now.',
+    'Progress over perfection—keep going.',
+    'Discipline is choosing what you want most.',
+    'You’re capable of more than you think.',
+    'Consistency beats intensity—show up today.',
+    'Learning never exhausts the mind.',
+    'Action is the foundational key to all success.',
+  ];
+
   /* life‑cycle */
   @override
   void initState() {
@@ -369,6 +402,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _loadUserData().then((_) {
       if (_hasLoadedUserData) {
         _syncDashboardToFirestore();
+        // Try sending weekly summary email once per week, if enabled
+        _maybeSendWeeklySummaryEmail();
       }
     });
 
@@ -379,6 +414,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     _startInactivityMonitor();
     _startStudyTick();
+    _scheduleWeeklySummaryNotification();
+    _scheduleDailyQuoteNotification();
+    _scheduleMidnightReschedule();
+
+    // Attempt to restore the last viewed page/file on startup
+    _scheduleRestoreView();
   }
 
   @override
@@ -390,6 +431,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     _backupTimer?.cancel();
     _inactivityTimer?.cancel();
+    _midnightRescheduleTimer?.cancel();
 
     _foldersSubscription?.cancel();
     _topLevelFilesSubscription?.cancel();
@@ -485,6 +527,151 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 }
               });
         }).toList();
+  }
+
+  // === View persistence helpers ===
+  Future<void> _persistViewState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (_showUserProfile) {
+        await prefs.setString(_kViewKey, 'profile');
+        await prefs.remove(_kFolderKey);
+        await prefs.remove(_kFileKey);
+      } else if (_showDashboard) {
+        await prefs.setString(_kViewKey, 'dashboard');
+        await prefs.remove(_kFolderKey);
+        await prefs.remove(_kFileKey);
+      } else if (_previewFile != null) {
+        await prefs.setString(_kViewKey, 'file');
+        await prefs.setString(_kFileKey, _previewFile!.id);
+        if (_previewFile!.folderId != null) {
+          await prefs.setString(_kFolderKey, _previewFile!.folderId!);
+        } else {
+          await prefs.remove(_kFolderKey);
+        }
+      } else if (_selectedFolder != null) {
+        await prefs.setString(_kViewKey, 'folder');
+        await prefs.setString(_kFolderKey, _selectedFolder!.id);
+        await prefs.remove(_kFileKey);
+      } else {
+        await prefs.setString(_kViewKey, 'home');
+        await prefs.remove(_kFolderKey);
+        await prefs.remove(_kFileKey);
+      }
+    } catch (e) {
+      debugPrint('View persist failed: $e');
+    }
+  }
+
+  Future<void> _clearPersistedView() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kViewKey);
+      await prefs.remove(_kFolderKey);
+      await prefs.remove(_kFileKey);
+    } catch (_) {}
+  }
+
+  void _scheduleRestoreView() async {
+    if (_restoreAttempted) return;
+    final prefs = await SharedPreferences.getInstance();
+    final lastView = prefs.getString(_kViewKey);
+    if (lastView == null || lastView == 'home') {
+      _restoreAttempted = true;
+      return; // nothing to restore
+    }
+    final lastFolderId = prefs.getString(_kFolderKey);
+    final lastFileId = prefs.getString(_kFileKey);
+
+    // Poll until data streams populate, or for ~10s
+    _restoreTries = 0;
+    _restoreTimer?.cancel();
+    _restoreTimer = Timer.periodic(const Duration(milliseconds: 250), (t) {
+      _restoreTries++;
+      final maxTries = 40; // ~10 seconds
+      if (!mounted || _restoreTries > maxTries) {
+        t.cancel();
+        _restoreAttempted = true;
+        return;
+      }
+
+      void finish() {
+        _restoreAttempted = true;
+        t.cancel();
+      }
+
+      if (lastView == 'profile') {
+        setState(() {
+          _showUserProfile = true;
+          _showDashboard = false;
+          _selectedFolder = null;
+          _previewFile = null;
+        });
+        finish();
+        return;
+      }
+      if (lastView == 'dashboard') {
+        setState(() {
+          _showDashboard = true;
+          _showUserProfile = false;
+          _selectedFolder = null;
+          _previewFile = null;
+        });
+        finish();
+        return;
+      }
+      if (lastView == 'folder' && lastFolderId != null) {
+        final folder = _folders.where((f) => f.id == lastFolderId).toList();
+        if (folder.isNotEmpty) {
+          setState(() {
+            _selectedFolder = folder.first;
+            _previewFile = null;
+            _showDashboard = false;
+            _showUserProfile = false;
+          });
+          finish();
+        }
+        return;
+      }
+      if (lastView == 'file' && lastFileId != null) {
+        // Try to find file in top-level
+        FileMeta? theFile = _topLevelFiles.firstWhere(
+          (f) => f.id == lastFileId,
+          orElse:
+              () => _filesByFolder.values
+                  .expand((lst) => lst)
+                  .firstWhere(
+                    (f) => f.id == lastFileId,
+                    orElse:
+                        () => FileMeta(
+                          id: '',
+                          name: '',
+                          size: 0,
+                          url: '',
+                          type: '',
+                          uploadedAt: DateTime.now(),
+                          folderId: null,
+                        ),
+                  ),
+        );
+        if (theFile.id.isNotEmpty) {
+          setState(() {
+            _previewFile = theFile;
+            _showDashboard = false;
+            _showUserProfile = false;
+            if (theFile.folderId != null) {
+              final match =
+                  _folders.where((f) => f.id == theFile.folderId).toList();
+              _selectedFolder = match.isNotEmpty ? match.first : null;
+            } else {
+              _selectedFolder = null;
+            }
+          });
+          finish();
+        }
+        return;
+      }
+    });
   }
 
   /* helpers */
@@ -626,6 +813,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             data['dailyActivity'] ?? _dailyActivity,
           );
           _userName = data['displayName'] ?? data['userName'] ?? 'User';
+          // Load notification/email preferences if present
+          final np = data['notificationPrefs'];
+          if (np is Map) {
+            _prefLocalStudyReminders =
+                (np['localStudyReminders'] ?? true) == true;
+            _prefLocalAchievements = (np['localAchievements'] ?? true) == true;
+            _prefLocalWeeklySummary =
+                (np['localWeeklySummary'] ?? true) == true;
+            _prefLocalDailyQuote = (np['localDailyQuote'] ?? true) == true;
+            _prefEmailAchievements = (np['emailAchievements'] ?? false) == true;
+            _prefEmailWeeklySummary =
+                (np['emailWeeklySummary'] ?? false) == true;
+          }
           final lastLoginTimestamp = data['lastLoginDate'] as Timestamp?;
           _lastLoginDate = lastLoginTimestamp?.toDate();
           _hasLoadedUserData = true;
@@ -843,6 +1043,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
 
     // Add streak milestones
+    if (_loginDays >= 7 && !_unlockedBadges.contains('week_warrior')) {
+      newBadges.add('week_warrior');
+      _recentAchievements.add('Week Warrior');
+    }
     if (_loginDays >= 30 && !_unlockedBadges.contains('month_master')) {
       newBadges.add('month_master');
       _recentAchievements.add('Month Master');
@@ -857,15 +1061,126 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _recentAchievements.skip(_recentAchievements.length - 5).toList();
     }
 
+    // Award XP for newly unlocked badges per reduced policy
+    if (newBadges.isNotEmpty) {
+      int earned = 0;
+      for (final b in newBadges) {
+        final info = _getBadgeInfo(b);
+        final pts = (info['points'] ?? 0) as int;
+        earned += pts;
+      }
+      if (earned > 0 && mounted) {
+        setState(() {
+          _totalPoints += earned;
+        });
+      }
+    }
+
     // CRITICAL: Save immediately after unlocking achievements
     if (newBadges.isNotEmpty) {
       _saveUserData();
       _syncDashboardToFirestore();
+      _showAchievementNotification(newBadges);
     }
 
     // Show achievement dialog for new badges
     for (final badge in newBadges) {
       _showAchievementDialog(badge);
+    }
+  }
+
+  // Called when a generated quiz is answered perfectly (all correct)
+  void _onPerfectQuizAllCorrect() {
+    if (!mounted) return;
+    setState(() {
+      _totalPoints += 5; // reward per policy
+    });
+    _saveUserData();
+    _syncDashboardToFirestore();
+    // Celebrate with a lightweight dialog
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Text('Perfect Quiz!'),
+          content: const Text(
+            'You answered all questions correctly. +5 XP awarded.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Nice!'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _showAchievementNotification(List<String> badgeIds) async {
+    if (badgeIds.isEmpty) return;
+    if (_prefLocalAchievements) {
+      final titles =
+          badgeIds
+              .map((id) => _getBadgeInfo(id)['title'])
+              .whereType<String>()
+              .toList();
+      final body =
+          titles.isEmpty ? 'New achievement unlocked!' : titles.join(', ');
+      await flutterLocalNotificationsPlugin.show(
+        2,
+        'Achievement Unlocked',
+        body,
+        const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'achievement_channel',
+            'Achievements',
+            channelDescription: 'Notifications for new achievements',
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+        ),
+      );
+    }
+    // Best-effort email notification
+    _sendAchievementEmail(badgeIds);
+  }
+
+  Future<void> _sendAchievementEmail(List<String> badgeIds) async {
+    if (!_prefEmailAchievements) return;
+    final email = _user?.email;
+    if (email == null || email.isEmpty) return;
+    final titles =
+        badgeIds
+            .map((id) => _getBadgeInfo(id)['title'])
+            .whereType<String>()
+            .toList();
+    final subject =
+        titles.isEmpty
+            ? 'You unlocked a new achievement – FileGenius'
+            : 'You unlocked: ${titles.join(', ')} – FileGenius';
+    final html =
+        StringBuffer()
+          ..writeln('<h2>Congratulations!</h2>')
+          ..writeln('<p>You just unlocked the following achievement(s):</p>')
+          ..writeln('<ul>');
+    for (final t in titles) {
+      html.writeln('<li><b>$t</b></li>');
+    }
+    html
+      ..writeln('</ul>')
+      ..writeln(
+        '<p>Open the app to see your badges and keep the streak going. 🚀</p>',
+      );
+    try {
+      await _emailService.sendEmail(
+        to: email,
+        subject: subject,
+        html: html.toString(),
+      );
+    } catch (_) {
+      // ignore failures
     }
   }
 
@@ -890,52 +1205,58 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return {
           'title': 'First Upload!',
           'icon': Icons.upload_file,
-          'points': 50,
+          // Upload chain total = 10 XP → 3 + 5 + 2
+          'points': 3,
         };
       case 'file_master':
-        return {'title': 'File Master!', 'icon': Icons.folder, 'points': 100};
+        return {'title': 'File Master!', 'icon': Icons.folder, 'points': 5};
       case 'file_expert':
         return {
           'title': 'File Expert!',
           'icon': Icons.workspace_premium,
-          'points': 150,
+          'points': 2,
         };
       case 'ai_explorer':
-        return {'title': 'AI Explorer!', 'icon': Icons.smart_toy, 'points': 75};
+        return {
+          'title': 'AI Explorer!',
+          'icon': Icons.smart_toy,
+          // Single action badge → 5 XP
+          'points': 5,
+        };
       case 'quiz_master':
-        return {'title': 'Quiz Master!', 'icon': Icons.quiz, 'points': 200};
+        return {
+          'title': 'Quiz Master!',
+          'icon': Icons.quiz,
+          // Quizzes chain total = 10 XP → 4 + 3 + 3
+          'points': 4,
+        };
       case 'century_club':
         return {
           'title': 'Century Club!',
           'icon': Icons.military_tech,
-          'points': 200,
+          // Points-based milestone → 0 XP to avoid feedback loops
+          'points': 0,
         };
       case 'point_prodigy':
-        return {
-          'title': 'Point Prodigy!',
-          'icon': Icons.diamond,
-          'points': 300,
-        };
+        return {'title': 'Point Prodigy!', 'icon': Icons.diamond, 'points': 0};
       case 'week_warrior':
         return {
           'title': 'Week Warrior!',
           'icon': Icons.emoji_events,
-          'points': 150,
+          // Two-login badges (7d, 30d) share 10 → 5 + 5
+          'points': 5,
         };
       case 'month_master':
-        return {'title': 'Month Master!', 'icon': Icons.stars, 'points': 250};
+        return {'title': 'Month Master!', 'icon': Icons.stars, 'points': 5};
       case 'scholar':
-        return {'title': 'Scholar!', 'icon': Icons.school, 'points': 250};
+        return {'title': 'Scholar!', 'icon': Icons.school, 'points': 3};
       case 'genius':
-        return {'title': 'Genius!', 'icon': Icons.psychology, 'points': 300};
+        return {'title': 'Genius!', 'icon': Icons.psychology, 'points': 3};
       case 'legendary':
-        return {
-          'title': 'Legendary!',
-          'icon': Icons.auto_awesome,
-          'points': 500,
-        };
+        return {'title': 'Legendary!', 'icon': Icons.auto_awesome, 'points': 0};
       default:
-        return {'title': 'Achievement!', 'icon': Icons.star, 'points': 25};
+        // Default single-badge actions → 5 XP
+        return {'title': 'Achievement!', 'icon': Icons.star, 'points': 5};
     }
   }
 
@@ -958,7 +1279,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final lastActivity = DateTime.parse(lastActivityStr);
       final now = DateTime.now();
       if (now.difference(lastActivity).inMinutes >= 120) {
-        _showStudyReminderNotification();
+        if (_prefLocalStudyReminders) {
+          _showStudyReminderNotification();
+        }
         timer.cancel(); // Only notify once until next activity
         _inactivityTimer = null;
       }
@@ -987,6 +1310,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _showStreakNotification(int streakDays) async {
+    if (!_prefLocalAchievements) return;
     await flutterLocalNotificationsPlugin.show(
       1,
       'Streak Alert!',
@@ -1001,6 +1325,143 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
       ),
     );
+  }
+
+  // Schedule a weekly reminder to review the analytics dashboard
+  Future<void> _scheduleWeeklySummaryNotification() async {
+    if (!_prefLocalWeeklySummary) return;
+    const android = AndroidNotificationDetails(
+      'weekly_summary_channel',
+      'Weekly Summary',
+      channelDescription: 'Weekly analytics snapshot reminder',
+      importance: Importance.defaultImportance,
+      priority: Priority.defaultPriority,
+    );
+    const details = NotificationDetails(android: android);
+    // Use a fixed ID so duplicates do not pile up across restarts
+    await flutterLocalNotificationsPlugin.periodicallyShow(
+      3,
+      'Weekly Report Ready',
+      'Open FileGenius to see your weekly learning summary.',
+      RepeatInterval.weekly,
+      details,
+      androidAllowWhileIdle: true,
+    );
+  }
+
+  // Schedule a daily inspirational quote notification
+  Future<void> _scheduleDailyQuoteNotification() async {
+    if (!_prefLocalDailyQuote) {
+      // Cancel if previously scheduled
+      await flutterLocalNotificationsPlugin.cancel(4);
+      return;
+    }
+    // Choose a quote deterministically by date to keep it stable during the day
+    final now = DateTime.now();
+    final dayKey =
+        DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
+    final quote = _dailyQuotes[dayKey % _dailyQuotes.length];
+    const android = AndroidNotificationDetails(
+      'daily_quote_channel',
+      'Daily Quote',
+      channelDescription: 'Daily inspirational quotes',
+      importance: Importance.defaultImportance,
+      priority: Priority.defaultPriority,
+    );
+    const details = NotificationDetails(android: android);
+    await flutterLocalNotificationsPlugin.periodicallyShow(
+      4,
+      'Today\'s Inspiration',
+      quote,
+      RepeatInterval.daily,
+      details,
+      androidAllowWhileIdle: true,
+    );
+  }
+
+  // Reschedule the daily quote at midnight so the content rotates
+  void _scheduleMidnightReschedule() {
+    _midnightRescheduleTimer?.cancel();
+    final now = DateTime.now();
+    final nextMidnight = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).add(const Duration(days: 1));
+    final delay = nextMidnight.difference(now);
+    _midnightRescheduleTimer = Timer(delay, () async {
+      if (!mounted) return;
+      await _scheduleDailyQuoteNotification();
+      _scheduleMidnightReschedule();
+    });
+  }
+
+  // Send one weekly summary email per week when the app is used
+  Future<void> _maybeSendWeeklySummaryEmail() async {
+    if (!_prefEmailWeeklySummary) return;
+    final email = _user?.email;
+    if (email == null || email.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final lastSentStr = prefs.getString('fg.lastWeeklyEmailSentAt');
+    DateTime? lastSent;
+    if (lastSentStr != null) {
+      try {
+        lastSent = DateTime.parse(lastSentStr);
+      } catch (_) {}
+    }
+    final now = DateTime.now();
+    // Start of week (Sunday)
+    final weekStart = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).subtract(Duration(days: now.weekday % 7));
+    if (lastSent != null && lastSent.isAfter(weekStart)) {
+      return; // already sent this week
+    }
+
+    final sessions = _weeklyPerformance.entries
+        .map((e) => '${e.key}: ${e.value}')
+        .join('<br/>');
+    final subjects = _studyTimeBySubject.entries
+        .map((e) => '${e.key}: ${e.value.toStringAsFixed(1)}h')
+        .join('<br/>');
+
+    final subject = 'Your FileGenius Weekly Summary';
+    final html =
+        StringBuffer()
+          ..writeln('<h2>Weekly Learning Summary</h2>')
+          ..writeln('<p>Here\'s a snapshot of your recent activity:</p>')
+          ..writeln('<h3>Study Sessions by Day</h3>')
+          ..writeln('<p>$sessions</p>')
+          ..writeln('<h3>Study Time by Subject</h3>')
+          ..writeln('<p>$subjects</p>')
+          ..writeln(
+            '<p><b>Total Study Time:</b> ${_totalStudyTime.toStringAsFixed(1)} hours</p>',
+          )
+          ..writeln('<p><b>Files Uploaded:</b> $_filesUploaded</p>')
+          ..writeln('<p><b>AI Interactions:</b> $_aiChatInteractions</p>')
+          ..writeln(
+            '<p><b>Quiz Questions Answered:</b> $_questionsAnswered</p>',
+          )
+          ..writeln('<hr/><p>Keep learning with FileGenius! 🚀</p>');
+
+    try {
+      final ok = await _emailService.sendEmail(
+        to: email,
+        subject: subject,
+        html: html.toString(),
+      );
+      if (ok) {
+        await prefs.setString(
+          'fg.lastWeeklyEmailSentAt',
+          now.toIso8601String(),
+        );
+      }
+    } catch (_) {
+      // ignore
+    }
   }
 
   @override
@@ -1043,6 +1504,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             _selectedFolder = null;
             _previewFile = null;
           });
+          _persistViewState();
         },
         onCreateFolder: _createFolderDialog,
         onUploadFile: _pickFiles,
@@ -1059,16 +1521,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               _previewFile = null;
               _showDashboard = false;
               _showUserProfile = false;
+              _persistViewState();
             }),
         onSelectAnyFile:
             (file) => setState(() {
               _previewFile = file;
               _showDashboard = false;
               _showUserProfile = false;
+              _persistViewState();
             }),
         onSignOut: () async {
           _clearPreview(); // Clear preview on sign out
           await FirebaseAuth.instance.signOut();
+          _clearPersistedView();
         },
         onUpgradePlan: () => _snack('Upgrade plan (todo)'),
         sidebarCollapsed: _sidebarCollapsed,
@@ -1096,6 +1561,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         content = UserProfileScreen(
           onBackPressed: () {
             setState(() => _showUserProfile = false);
+            _persistViewState();
           },
         );
       } else if (_showDashboard) {
@@ -1106,18 +1572,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             setState(() {
               _showDashboard = false;
             });
+            _persistViewState();
           },
           onUploadFiles: () {
             setState(() {
               _showDashboard = false;
             });
             _pickFiles();
+            _persistViewState();
           },
           onGenerateQuiz: () {
             setState(() {
               _showDashboard = false;
             });
             _snack('Quiz generation feature coming soon!');
+            _persistViewState();
           },
           onAIInteraction: () {
             setState(() {
@@ -1126,6 +1595,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             _snack(
               'AI Assistant: Ask questions about your files in the file preview pane',
             );
+            _persistViewState();
           },
           dashboardKey: _dashboardKey,
         );
@@ -1144,10 +1614,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               (file) => setState(() {
                 _previewFile = file;
                 if (file != null) _startStudySession(_deriveSubject(file));
+                _persistViewState();
               }),
           onDeleteFile: _handleDeleteFile,
           onAIInteractionSuccess: onAIInteractionSuccess,
           onQuizAnswerSubmitted: onQuizAnswerSubmitted,
+          onPerfectQuizAllCorrect: _onPerfectQuizAllCorrect,
         );
       } else if (_selectedFolder != null) {
         // Leaving file view -> end session
@@ -1163,10 +1635,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               (file) => setState(() {
                 _previewFile = file;
                 if (file != null) _startStudySession(_deriveSubject(file));
+                _persistViewState();
               }),
           onDeleteFile: _handleDeleteFile,
           onAIInteractionSuccess: onAIInteractionSuccess,
           onQuizAnswerSubmitted: onQuizAnswerSubmitted,
+          onPerfectQuizAllCorrect: _onPerfectQuizAllCorrect,
         );
       } else {
         _endStudySession(flush: true);
@@ -1181,10 +1655,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               (file) => setState(() {
                 _previewFile = file;
                 if (file != null) _startStudySession(_deriveSubject(file));
+                _persistViewState();
               }),
           onDeleteFile: _handleDeleteFile,
           onAIInteractionSuccess: onAIInteractionSuccess,
           onQuizAnswerSubmitted: onQuizAnswerSubmitted,
+          onPerfectQuizAllCorrect: _onPerfectQuizAllCorrect,
         );
       }
 

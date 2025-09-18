@@ -24,6 +24,7 @@ class EnhancedAIChatWidget extends StatefulWidget {
   final Map<String, dynamic>? fileMetadata; // stays
   final VoidCallback? onInteractionSuccess;
   final void Function(bool isCorrect)? onQuizAnswerSubmitted;
+  final VoidCallback? onPerfectQuizAllCorrect;
   final bool autoSummarize;
 
   const EnhancedAIChatWidget({
@@ -36,6 +37,7 @@ class EnhancedAIChatWidget extends StatefulWidget {
     this.fileMetadata, // <-- ADDED (initializes final field)
     this.onInteractionSuccess,
     this.onQuizAnswerSubmitted,
+    this.onPerfectQuizAllCorrect,
     this.autoSummarize = false,
   });
 
@@ -1010,7 +1012,10 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                       // Render flashcards for quiz messages
                       if (!isUser && message.messageType == 'quiz') ...[
                         const SizedBox(height: 12),
-                        _buildFlashcards(message.metadata?['cards']),
+                        _buildFlashcards(
+                          message.metadata?['cards'],
+                          parentMessage: message,
+                        ),
                       ],
 
                       // Show follow-ups for summary messages
@@ -1348,7 +1353,10 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
   }
 
   // Build a grid/column of flashcards using FlashcardWidget
-  Widget _buildFlashcards(dynamic cardsRaw) {
+  Widget _buildFlashcards(
+    dynamic cardsRaw, {
+    required EnhancedChatMessage parentMessage,
+  }) {
     if (cardsRaw is! List) return const SizedBox.shrink();
     final cards =
         cardsRaw
@@ -1421,6 +1429,12 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                         'Answer: $ans${explanation.isNotEmpty ? '\n\n$explanation' : ''}';
                 }
 
+                // Determine if this card was previously answered from THIS message metadata
+                final answered =
+                    (parentMessage.metadata?['answeredIndexes'] as List?)
+                        ?.cast<int>() ??
+                    const <int>[];
+
                 return SizedBox(
                   width: itemWidth,
                   child: FlashcardWidget(
@@ -1432,8 +1446,75 @@ class _EnhancedAIChatWidgetState extends State<EnhancedAIChatWidget>
                         (card['options'] as List?)
                             ?.map((e) => e.toString())
                             .toList(),
-                    onAnswered: (isCorrect) {
+                    initiallyAnswered: answered.contains(idx),
+                    onAnswered: (isCorrect) async {
                       widget.onQuizAnswerSubmitted?.call(isCorrect);
+                      // Persist that this flashcard index was answered to prevent re-answers
+                      try {
+                        // Persist against the same parentMessage (this quiz block)
+                        final quizIndex = _currentSession!.messages.indexWhere(
+                          (m) => m.id == parentMessage.id,
+                        );
+                        if (quizIndex != -1) {
+                          final quizMsg = _currentSession!.messages[quizIndex];
+                          final meta = Map<String, dynamic>.from(
+                            quizMsg.metadata ?? {},
+                          );
+                          final List<int> answeredIdx =
+                              (meta['answeredIndexes'] as List?)?.cast<int>() ??
+                              <int>[];
+                          if (!answeredIdx.contains(idx)) {
+                            answeredIdx.add(idx);
+                          }
+                          // Track correctness as well
+                          final List<int> correctIdx =
+                              (meta['correctIndexes'] as List?)?.cast<int>() ??
+                              <int>[];
+                          if (isCorrect && !correctIdx.contains(idx)) {
+                            correctIdx.add(idx);
+                          }
+                          // Check for perfect quiz condition (all answered and all correct)
+                          final totalCards = cards.length;
+                          final bool alreadyRewarded =
+                              meta['rewardedPerfect'] == true;
+                          final bool allAnswered =
+                              answeredIdx.length >= totalCards;
+                          final bool allCorrect =
+                              correctIdx.length >= totalCards;
+                          meta['answeredIndexes'] = answeredIdx;
+                          meta['correctIndexes'] = correctIdx;
+                          // Update message locally and in Firestore
+                          final updated = quizMsg.copyWith(metadata: meta);
+                          _currentSession!.messages[quizIndex] = updated;
+                          await _conversationManager.updateMessage(
+                            sessionId: _currentSession!.id,
+                            messageId: quizMsg.id,
+                            updatedMessage: updated,
+                          );
+                          // Trigger perfect-quiz reward once
+                          if (!alreadyRewarded && allAnswered && allCorrect) {
+                            // Mark rewarded flag first to avoid duplicates
+                            final rewardedMeta = Map<String, dynamic>.from(
+                              updated.metadata ?? {},
+                            );
+                            rewardedMeta['rewardedPerfect'] = true;
+                            final rewardedMsg = updated.copyWith(
+                              metadata: rewardedMeta,
+                            );
+                            _currentSession!.messages[quizIndex] = rewardedMsg;
+                            await _conversationManager.updateMessage(
+                              sessionId: _currentSession!.id,
+                              messageId: rewardedMsg.id,
+                              updatedMessage: rewardedMsg,
+                            );
+                            // Now call the callback to grant XP and celebrate
+                            widget.onPerfectQuizAllCorrect?.call();
+                          }
+                          setState(() {});
+                        }
+                      } catch (e) {
+                        debugPrint('Failed to persist answered state: $e');
+                      }
                     },
                   ),
                 );

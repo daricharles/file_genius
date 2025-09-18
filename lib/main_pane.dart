@@ -25,6 +25,7 @@ class MainPane extends StatefulWidget {
     this.onDeleteFile,
     this.onAIInteractionSuccess,
     this.onQuizAnswerSubmitted,
+    this.onPerfectQuizAllCorrect,
   });
 
   final Folder? selectedFolder;
@@ -37,6 +38,7 @@ class MainPane extends StatefulWidget {
   final void Function(FileMeta file)? onDeleteFile;
   final VoidCallback? onAIInteractionSuccess;
   final void Function(bool isCorrect)? onQuizAnswerSubmitted;
+  final VoidCallback? onPerfectQuizAllCorrect;
 
   @override
   State<MainPane> createState() => _MainPaneState();
@@ -687,6 +689,7 @@ extension on _MainPaneState {
           autoSummarize: true,
           onInteractionSuccess: widget.onAIInteractionSuccess,
           onQuizAnswerSubmitted: widget.onQuizAnswerSubmitted,
+          onPerfectQuizAllCorrect: widget.onPerfectQuizAllCorrect,
         );
       },
     );

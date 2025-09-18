@@ -27,6 +27,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   bool _isEditing = false;
   String? _profileImageUrl;
   bool _isUploadingImage = false;
+  // Notification & email preferences
+  bool _prefLocalStudyReminders = true;
+  bool _prefLocalAchievements = true;
+  bool _prefLocalWeeklySummary = true;
+  bool _prefLocalDailyQuote = true;
+  bool _prefEmailAchievements = false;
+  bool _prefEmailWeeklySummary = false;
 
   @override
   void initState() {
@@ -75,6 +82,20 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             _phoneController.text = data['phone'] ?? '';
             _bioController.text = data['bio'] ?? '';
             _profileImageUrl = data['profileImageUrl'] ?? user.photoURL;
+            final prefs = Map<String, dynamic>.from(
+              data['notificationPrefs'] ?? {},
+            );
+            _prefLocalStudyReminders =
+                (prefs['localStudyReminders'] ?? true) == true;
+            _prefLocalAchievements =
+                (prefs['localAchievements'] ?? true) == true;
+            _prefLocalWeeklySummary =
+                (prefs['localWeeklySummary'] ?? true) == true;
+            _prefLocalDailyQuote = (prefs['localDailyQuote'] ?? true) == true;
+            _prefEmailAchievements =
+                (prefs['emailAchievements'] ?? false) == true;
+            _prefEmailWeeklySummary =
+                (prefs['emailWeeklySummary'] ?? false) == true;
           });
         } else if (!doc.exists && mounted) {
           await _createInitialUserDocument(user);
@@ -106,6 +127,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         'phone': '',
         'bio': '',
         'profileImageUrl': user.photoURL,
+        'notificationPrefs': {
+          'localStudyReminders': true,
+          'localAchievements': true,
+          'localWeeklySummary': true,
+          'emailAchievements': false,
+          'emailWeeklySummary': false,
+        },
         'createdAt': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
@@ -130,6 +158,14 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           'phone': _phoneController.text.trim(),
           'bio': _bioController.text.trim(),
           'profileImageUrl': _profileImageUrl,
+          'notificationPrefs': {
+            'localStudyReminders': _prefLocalStudyReminders,
+            'localAchievements': _prefLocalAchievements,
+            'localWeeklySummary': _prefLocalWeeklySummary,
+            'localDailyQuote': _prefLocalDailyQuote,
+            'emailAchievements': _prefEmailAchievements,
+            'emailWeeklySummary': _prefEmailWeeklySummary,
+          },
           'updatedAt': FieldValue.serverTimestamp(),
         };
 
@@ -596,6 +632,46 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                 ),
               ),
               const SizedBox(height: 24),
+              const Text(
+                'Notifications & Emails',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: kTextPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _buildSwitch(
+                title: 'Study reminders (local notification)',
+                value: _prefLocalStudyReminders,
+                onChanged: (v) => setState(() => _prefLocalStudyReminders = v),
+              ),
+              _buildSwitch(
+                title: 'Achievement alerts (local notification)',
+                value: _prefLocalAchievements,
+                onChanged: (v) => setState(() => _prefLocalAchievements = v),
+              ),
+              _buildSwitch(
+                title: 'Weekly summary (local notification)',
+                value: _prefLocalWeeklySummary,
+                onChanged: (v) => setState(() => _prefLocalWeeklySummary = v),
+              ),
+              _buildSwitch(
+                title: 'Daily inspirational quote (local notification)',
+                value: _prefLocalDailyQuote,
+                onChanged: (v) => setState(() => _prefLocalDailyQuote = v),
+              ),
+              _buildSwitch(
+                title: 'Achievement emails',
+                value: _prefEmailAchievements,
+                onChanged: (v) => setState(() => _prefEmailAchievements = v),
+              ),
+              _buildSwitch(
+                title: 'Weekly summary emails',
+                value: _prefEmailWeeklySummary,
+                onChanged: (v) => setState(() => _prefEmailWeeklySummary = v),
+              ),
+              const Divider(height: 32),
               _buildTextField(
                 controller: _displayNameController,
                 label: 'Display Name',
@@ -752,6 +828,20 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         filled: true,
         fillColor: enabled && _isEditing ? Colors.white : Colors.grey.shade50,
       ),
+    );
+  }
+
+  Widget _buildSwitch({
+    required String title,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return SwitchListTile(
+      title: Text(title),
+      value: value,
+      onChanged: _isEditing ? onChanged : null,
+      activeColor: kBrand,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 0),
     );
   }
 

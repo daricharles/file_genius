@@ -10,6 +10,7 @@ class FlashcardWidget extends StatefulWidget {
   final String? type; // mcq | true_false | fill_blank
   final List<String>? options; // for mcq
   final void Function(bool isCorrect)? onAnswered; // callback when user answers
+  final bool initiallyAnswered; // persist-lock state across rebuilds
 
   const FlashcardWidget({
     super.key,
@@ -19,6 +20,7 @@ class FlashcardWidget extends StatefulWidget {
     this.type,
     this.options,
     this.onAnswered,
+    this.initiallyAnswered = false,
   });
 
   @override
@@ -76,6 +78,8 @@ class _FlashcardWidgetState extends State<FlashcardWidget>
       vsync: this,
       duration: const Duration(milliseconds: 500),
     );
+    // Respect persisted answered state so options remain disabled
+    _answered = widget.initiallyAnswered;
   }
 
   @override
@@ -223,12 +227,16 @@ class _FlashcardWidgetState extends State<FlashcardWidget>
                   ),
                   decoration: BoxDecoration(
                     color:
-                        selected
+                        _answered
+                            ? Colors.grey.shade100
+                            : selected
                             ? Theme.of(context).primaryColor.withOpacity(0.1)
                             : Colors.white,
                     border: Border.all(
                       color:
-                          selected
+                          _answered
+                              ? Colors.grey.shade300
+                              : selected
                               ? Theme.of(context).primaryColor
                               : Colors.grey.shade300,
                     ),
@@ -243,19 +251,23 @@ class _FlashcardWidgetState extends State<FlashcardWidget>
                           shape: BoxShape.circle,
                           border: Border.all(
                             color:
-                                selected
+                                _answered
+                                    ? Colors.grey
+                                    : selected
                                     ? Theme.of(context).primaryColor
                                     : Colors.grey,
                           ),
                           color:
-                              selected
+                              _answered
+                                  ? Colors.grey.shade200
+                                  : selected
                                   ? Theme.of(
                                     context,
                                   ).primaryColor.withOpacity(0.1)
                                   : Colors.transparent,
                         ),
                         child:
-                            selected
+                            selected && !_answered
                                 ? Center(
                                   child: Container(
                                     width: 12,
@@ -269,7 +281,17 @@ class _FlashcardWidgetState extends State<FlashcardWidget>
                                 : null,
                       ),
                       const SizedBox(width: 8),
-                      Expanded(child: Text(options[i])),
+                      Expanded(
+                        child: Text(
+                          options[i],
+                          style: TextStyle(
+                            color:
+                                _answered
+                                    ? Colors.grey.shade600
+                                    : Colors.black87,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -337,8 +359,11 @@ class _FlashcardWidgetState extends State<FlashcardWidget>
               icon: const Icon(Icons.check),
               label: const Text('True'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green.withOpacity(0.1),
-                foregroundColor: Colors.green[800],
+                backgroundColor:
+                    _answered
+                        ? Colors.grey.shade100
+                        : Colors.green.withOpacity(0.1),
+                foregroundColor: _answered ? Colors.grey : Colors.green[800],
               ),
             ),
           ),
@@ -349,8 +374,11 @@ class _FlashcardWidgetState extends State<FlashcardWidget>
               icon: const Icon(Icons.close),
               label: const Text('False'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red.withOpacity(0.1),
-                foregroundColor: Colors.red[800],
+                backgroundColor:
+                    _answered
+                        ? Colors.grey.shade100
+                        : Colors.red.withOpacity(0.1),
+                foregroundColor: _answered ? Colors.grey : Colors.red[800],
               ),
             ),
           ),
