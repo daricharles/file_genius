@@ -41,6 +41,9 @@ import 'services/file_content_extractor.dart';
 import 'services/ai_service.dart';
 import 'services/question_suggestions_service.dart';
 import 'services/email_service.dart';
+import 'package:timezone/data/latest.dart' as tzdata;
+import 'package:timezone/timezone.dart' as tz;
+import 'package:flutter_native_timezone_updated_gradle/flutter_native_timezone.dart';
 
 /// Achievement notification dialog with animations
 class AchievementDialog extends StatefulWidget {
@@ -351,7 +354,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Last activity tracking
   DateTime? _lastActivityTime;
   Timer? _inactivityTimer;
-  Timer? _midnightRescheduleTimer;
+  Timer?
+  _midnightRescheduleTimer; // deprecated with zoned schedule (kept for backward safety)
+  bool _tzInitialized = false;
 
   // User profile flag
   bool _showUserProfile = false;
@@ -416,7 +421,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _startStudyTick();
     _scheduleWeeklySummaryNotification();
     _scheduleDailyQuoteNotification();
-    _scheduleMidnightReschedule();
 
     // Attempt to restore the last viewed page/file on startup
     _scheduleRestoreView();
@@ -1345,22 +1349,49 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       'Open FileGenius to see your weekly learning summary.',
       RepeatInterval.weekly,
       details,
-      androidAllowWhileIdle: true,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
     );
+  }
+
+  // Initialize timezone database and set local location for zoned scheduling
+  Future<void> _ensureTzInitialized() async {
+    if (_tzInitialized) return;
+    try {
+      tzdata.initializeTimeZones();
+      final localName = await FlutterNativeTimezone.getLocalTimezone();
+      tz.setLocalLocation(tz.getLocation(localName));
+      _tzInitialized = true;
+    } catch (e) {
+      debugPrint('Timezone init failed: $e');
+      try {
+        tzdata.initializeTimeZones();
+        tz.setLocalLocation(tz.local);
+        _tzInitialized = true;
+      } catch (_) {}
+    }
   }
 
   // Schedule a daily inspirational quote notification
   Future<void> _scheduleDailyQuoteNotification() async {
     if (!_prefLocalDailyQuote) {
-      // Cancel if previously scheduled
       await flutterLocalNotificationsPlugin.cancel(4);
       return;
     }
-    // Choose a quote deterministically by date to keep it stable during the day
-    final now = DateTime.now();
+    await _ensureTzInitialized();
+    final now = tz.TZDateTime.now(tz.local);
+    var scheduled = tz.TZDateTime(tz.local, now.year, now.month, now.day, 8);
+    if (scheduled.isBefore(now)) {
+      scheduled = scheduled.add(const Duration(days: 1));
+    }
+    // Deterministic quote based on the scheduled date
     final dayKey =
-        DateTime(now.year, now.month, now.day).millisecondsSinceEpoch;
+        DateTime(
+          scheduled.year,
+          scheduled.month,
+          scheduled.day,
+        ).millisecondsSinceEpoch;
     final quote = _dailyQuotes[dayKey % _dailyQuotes.length];
+
     const android = AndroidNotificationDetails(
       'daily_quote_channel',
       'Daily Quote',
@@ -1369,32 +1400,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       priority: Priority.defaultPriority,
     );
     const details = NotificationDetails(android: android);
-    await flutterLocalNotificationsPlugin.periodicallyShow(
+    // Use zoned schedule to fire at 8:00 AM local time daily
+    await flutterLocalNotificationsPlugin.zonedSchedule(
       4,
       'Today\'s Inspiration',
       quote,
-      RepeatInterval.daily,
+      scheduled,
       details,
-      androidAllowWhileIdle: true,
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      matchDateTimeComponents: DateTimeComponents.time,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.wallClockTime,
     );
   }
 
-  // Reschedule the daily quote at midnight so the content rotates
-  void _scheduleMidnightReschedule() {
-    _midnightRescheduleTimer?.cancel();
-    final now = DateTime.now();
-    final nextMidnight = DateTime(
-      now.year,
-      now.month,
-      now.day,
-    ).add(const Duration(days: 1));
-    final delay = nextMidnight.difference(now);
-    _midnightRescheduleTimer = Timer(delay, () async {
-      if (!mounted) return;
-      await _scheduleDailyQuoteNotification();
-      _scheduleMidnightReschedule();
-    });
-  }
+  // Midnight rescheduler removed: zonedSchedule with DateTimeComponents.time
+  // ensures the notification repeats daily at the target time.
 
   // Send one weekly summary email per week when the app is used
   Future<void> _maybeSendWeeklySummaryEmail() async {
