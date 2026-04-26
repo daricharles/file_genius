@@ -1,4 +1,4 @@
-// ignore_for_file: use_build_context_synchronously
+// ignore_for_file: await_only_futures, use_build_context_synchronously
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -59,21 +59,34 @@ class _SignupPageState extends State<SignupPage> {
 
   Future<void> signInWithGoogle() async {
     try {
-      final GoogleSignIn googleSignIn = GoogleSignIn(
+      final googleSignIn = GoogleSignIn.instance;
+
+      await googleSignIn.initialize(
         clientId:
             kIsWeb
-                ? '951614019398-0544hs7bk9h89cg8hufq9adhssicbe91.apps.googleusercontent.com' // 🔁 Replace this
+                ? '951614019398-0544hs7bk9h89cg8hufq9adhssicbe91.apps.googleusercontent.com'
                 : null,
       );
 
-      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+      if (googleSignIn.supportsAuthenticate()) {
+        await googleSignIn.authenticate();
+      } else {
+        await googleSignIn.attemptLightweightAuthentication();
+      }
+
+      final googleUser = await googleSignIn.authenticationEvents.first
+          .then((event) {
+            if (event is GoogleSignInAuthenticationEventSignIn) {
+              return event.user;
+            }
+            return null;
+          });
+
       if (googleUser == null) return;
 
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
+      final googleAuth = await googleUser.authentication;
 
       final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 

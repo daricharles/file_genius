@@ -31,48 +31,48 @@ dependencies:
   flutter:
     sdk: flutter
   dio: ^5.4.0
-  flutter_markdown: ^0.6.18
-  google_generative_ai: ^0.3.2
+  flutter_markdown: ^0.7.7+1
+  google_generative_ai: ^0.4.7
 
   # ─── Firebase (current stable bundle – all 100 % compatible) ───
-  firebase_core:     ^2.30.0
-  firebase_auth:     ^4.19.1
-  cloud_firestore:   ^4.16.1
-  firebase_storage:  ^11.7.2
+  firebase_core: ^4.7.0
+  firebase_auth: ^6.4.0
+  cloud_firestore: ^6.3.0
+  firebase_storage: ^13.3.0
 
   # ─── File picker (federated, includes web / desktop stubs) ───
-  file_picker:       ^6.1.1
+  file_picker: ^11.0.2
 
   # ─── File viewer (for PPT, PDf, and Docx files.) ───
-  syncfusion_flutter_pdfviewer: ^24.2.9  # Better PDF viewer with text selection
-  syncfusion_flutter_pdf: ^24.2.9       # For PDF text extraction
+  syncfusion_flutter_pdfviewer: ^33.2.3  # Better PDF viewer with text selection
+  syncfusion_flutter_pdf: ^33.2.3       # For PDF text extraction
   http: ^1.2.1            # <— NEW (for downloading the PDF)
   webview_flutter: ^4.5.0 # already present in your project
   webview_flutter_web: ^0.2.2+4  # Web support for WebView
 
   # ─── Other libs ───
-  google_sign_in:    ^6.2.1
+  google_sign_in: ^7.2.0
   url_launcher:      ^6.2.6
-  dotted_border:     ^2.1.0
-  intl:              ^0.19.0  # Force latest version to avoid deprecation warnings
+  dotted_border: ^3.1.0
+  intl: ^0.20.2  # Force latest version to avoid deprecation warnings
   read_pdf_text: ^0.3.1
   path_provider: ^2.1.2
-  flutter_dotenv: ^5.1.0
-  fl_chart: ^0.66.2  # For advanced charts and analytics
+  flutter_dotenv: ^6.0.1
+  fl_chart: ^1.2.0  # For advanced charts and analytics
   uuid: ^4.1.0  # For generating unique IDs
   shared_preferences: ^2.2.2  # For storing chat sessions
-  flutter_local_notifications: ^17.1.2
-  timezone: ^0.9.2
+  flutter_local_notifications: ^21.0.0
+  timezone: ^0.11.0
   flutter_native_timezone_updated_gradle: ^2.0.3
   provider: ^6.0.0
-  flutter_riverpod: ^2.4.9
+  flutter_riverpod: ^3.3.1
   flutter_tts: ^4.0.2
-  speech_to_text: ^6.6.0
-  permission_handler: ^11.0.1
+  speech_to_text: ^7.3.0
+  permission_handler: ^12.0.1
 
   # Needed by Firebase‑web; fixes the PromiseJsImpl symbol.
   js: ^0.7.2
-  web: ^0.5.1
+  web: ^1.1.1
   flutter_web_plugins:
     sdk: flutter
 
@@ -96,7 +96,6 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
-    - assets/.env
     - assets/images/google_logo.png
     - assets/images/login_illustration.png
   # The following line ensures that the Material Icons font is

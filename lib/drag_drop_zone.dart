@@ -28,11 +28,12 @@ class DragDropZone extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DottedBorder(
-      color: kBrand,
-      strokeWidth: 1.5,
-      dashPattern: const [6, 4],
-      borderType: BorderType.RRect,
-      radius: const Radius.circular(12),
+      options: RoundedRectDottedBorderOptions(
+        color: kBrand,
+        strokeWidth: 1.5,
+        dashPattern: const [6, 4],
+        radius: const Radius.circular(12),
+      ),
       child: DragTarget<PlatformFile>(
         onAcceptWithDetails: (details) async {
           final pf = details.data;

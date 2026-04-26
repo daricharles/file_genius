@@ -208,7 +208,9 @@ Future<void> _initNotifications() async {
   const InitializationSettings initializationSettings = InitializationSettings(
     android: initializationSettingsAndroid,
   );
-  await flutterLocalNotificationsPlugin.initialize(initializationSettings);
+  await flutterLocalNotificationsPlugin.initialize(
+    settings: initializationSettings,
+  );
 }
 
 Future<void> main() async {
@@ -1133,10 +1135,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final body =
           titles.isEmpty ? 'New achievement unlocked!' : titles.join(', ');
       await flutterLocalNotificationsPlugin.show(
-        2,
-        'Achievement Unlocked',
-        body,
-        const NotificationDetails(
+        id: 2,
+        title: 'Achievement Unlocked',
+        body: body,
+        notificationDetails: const NotificationDetails(
           android: AndroidNotificationDetails(
             'achievement_channel',
             'Achievements',
@@ -1306,20 +1308,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       android: androidPlatformChannelSpecifics,
     );
     await flutterLocalNotificationsPlugin.show(
-      0,
-      'Time to Study!',
-      'You haven\'t been active for a while. Let\'s reinforce your learning!',
-      platformChannelSpecifics,
+      id: 0,
+      title: 'Time to Study!',
+      body: 'You haven\'t been active for a while. Let\'s reinforce your learning!',
+      notificationDetails: platformChannelSpecifics,
     );
   }
 
   Future<void> _showStreakNotification(int streakDays) async {
     if (!_prefLocalAchievements) return;
     await flutterLocalNotificationsPlugin.show(
-      1,
-      'Streak Alert!',
-      'You\'re on a $streakDays-day learning streak! Keep going for more rewards!',
-      const NotificationDetails(
+      id: 1,
+      title: 'Streak Alert!',
+      body: 'You\'re on a $streakDays-day learning streak! Keep going for more rewards!',
+      notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           'streak_channel',
           'Streak Notifications',
@@ -1344,11 +1346,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     const details = NotificationDetails(android: android);
     // Use a fixed ID so duplicates do not pile up across restarts
     await flutterLocalNotificationsPlugin.periodicallyShow(
-      3,
-      'Weekly Report Ready',
-      'Open FileGenius to see your weekly learning summary.',
-      RepeatInterval.weekly,
-      details,
+      id: 3,
+      title: 'Weekly Report Ready',
+      body: 'Open FileGenius to see your weekly learning summary.',
+      repeatInterval: RepeatInterval.weekly,
+      notificationDetails: details,
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
     );
   }
@@ -1374,7 +1376,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Schedule a daily inspirational quote notification
   Future<void> _scheduleDailyQuoteNotification() async {
     if (!_prefLocalDailyQuote) {
-      await flutterLocalNotificationsPlugin.cancel(4);
+      await flutterLocalNotificationsPlugin.cancel(id: 4);
       return;
     }
     await _ensureTzInitialized();
@@ -1402,15 +1404,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     const details = NotificationDetails(android: android);
     // Use zoned schedule to fire at 8:00 AM local time daily
     await flutterLocalNotificationsPlugin.zonedSchedule(
-      4,
-      'Today\'s Inspiration',
-      quote,
-      scheduled,
-      details,
+      id: 4,
+      title: 'Today\'s Inspiration',
+      body: quote,
+      scheduledDate: scheduled,
+      notificationDetails: details,
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
       matchDateTimeComponents: DateTimeComponents.time,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.wallClockTime,
     );
   }
 
@@ -1837,7 +1837,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /* file picker & uploads */
   Future<void> _pickFiles() async {
-    final res = await FilePicker.platform.pickFiles(
+    final res = await FilePicker.pickFiles(
       allowMultiple: true,
       withData: true,
       type: FileType.custom,

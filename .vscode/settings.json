@@ -1,5 +1,6 @@
 {
     "cSpell.words": [
+        "adhssicbe",
         "Annan",
         "backoffs",
         "Buffett",
@@ -11,6 +12,8 @@
         "filegenius",
         "firestore",
         "foldered",
+        "googleusercontent",
+        "hufq",
         "invalidemail",
         "Kofi",
         "Mercier",
@@ -19,6 +22,7 @@
         "pdfviewer",
         "pdfx",
         "prefs",
+        "rescheduler",
         "retryable",
         "riverpod",
         "Schyler",
@@ -28,8 +32,15 @@
         "swiftpm",
         "Symbolication",
         "syncfusion",
+        "tzdata",
         "Uncategorised",
         "Unser"
     ],
-    "editor.quickSuggestions": false
+    "editor.quickSuggestions": {
+        "comments": "off",
+        "strings": "off",
+        "other": "off"
+    },
+    "cmake.sourceDirectory": "C:/Users/charl/Desktop/File_Genius/file_genius/windows",
+    "java.configuration.updateBuildConfiguration": "interactive"
 }

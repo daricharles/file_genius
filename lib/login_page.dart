@@ -72,21 +72,40 @@ class _LoginPageState extends State<LoginPage> {
         isLoading = true;
       });
 
-      final GoogleSignIn googleSignIn = GoogleSignIn(
+      final googleSignIn = GoogleSignIn.instance;
+
+      // Initialize with clientId for web
+      await googleSignIn.initialize(
         clientId:
             kIsWeb
                 ? '951614019398-0544hs7bk9h89cg8hufq9adhssicbe91.apps.googleusercontent.com'
                 : null,
       );
 
-      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
+      // Trigger the sign-in flow
+      if (googleSignIn.supportsAuthenticate()) {
+        await googleSignIn.authenticate();
+      } else {
+        // Fallback: attempt lightweight (silent) sign-in
+        await googleSignIn.attemptLightweightAuthentication();
+      }
+
+      // Get the current signed-in user
+      final googleUser = await googleSignIn.authenticationEvents.first
+          .then((event) {
+            if (event is GoogleSignInAuthenticationEventSignIn) {
+              return event.user;
+            }
+            return null;
+          });
+
       if (googleUser == null) return;
 
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
+      // Get the ID token for Firebase
+      // ignore: await_only_futures
+      final googleAuth = await googleUser.authentication;
 
       final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
