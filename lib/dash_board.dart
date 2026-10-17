@@ -79,8 +79,10 @@ class DashboardScreenState extends State<DashboardScreen> {
     _loadDashboardData();
 
     _dashboardSubscription = _firestore
-        .collection('dashboards')
+        .collection('users')
         .doc(widget.userId)
+        .collection('dashboard')
+        .doc('stats')
         .snapshots()
         .listen((snapshot) {
           if (!mounted) return;
@@ -189,21 +191,35 @@ class DashboardScreenState extends State<DashboardScreen> {
     if (!mounted) return;
 
     try {
-      // Always prefer user collection for the source of truth
+      // Primary source: user subcollection dashboard stats, then user doc, with legacy fallback
+      final dashboardDoc = await _firestore
+          .collection('users')
+          .doc(widget.userId)
+          .collection('dashboard')
+          .doc('stats')
+          .get();
       final userDoc =
           await _firestore.collection('users').doc(widget.userId).get();
-      final dashboardDoc =
-          await _firestore.collection('dashboards').doc(widget.userId).get();
 
       if (!mounted) return;
 
       Map<String, dynamic>? data;
 
-      // Use user data as primary source, dashboard as backup
-      if (userDoc.exists) {
-        data = userDoc.data();
-      } else if (dashboardDoc.exists) {
+      if (dashboardDoc.exists) {
         data = dashboardDoc.data();
+      } else if (userDoc.exists) {
+        data = userDoc.data();
+      } else {
+        // Fallback for legacy dashboards collection if existing
+        try {
+          final legacyDoc = await _firestore
+              .collection('dashboards')
+              .doc(widget.userId)
+              .get();
+          if (legacyDoc.exists) {
+            data = legacyDoc.data();
+          }
+        } catch (_) {}
       }
 
       if (data != null && mounted) {
@@ -294,7 +310,11 @@ class DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _saveToFirestore() async {
-    final docRef = _firestore.collection('dashboards').doc(widget.userId);
+    final docRef = _firestore
+        .collection('users')
+        .doc(widget.userId)
+        .collection('dashboard')
+        .doc('stats');
 
     final data = {
       'filesUploaded': _filesUploaded,

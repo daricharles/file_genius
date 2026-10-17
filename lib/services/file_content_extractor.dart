@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'package:read_pdf_text/read_pdf_text.dart';
@@ -27,7 +27,11 @@ class FileContentExtractor {
         case 'docx':
         case 'pptx':
         case 'xlsx':
-          return await _extractOfficeContent(fileUrl, fileType);
+          return await _extractOfficeContent(
+            fileUrl: fileUrl,
+            fileType: fileType,
+            fileName: fileName,
+          );
         default:
           return 'File type $fileType is not supported for text extraction.';
       }
@@ -97,32 +101,95 @@ class FileContentExtractor {
     }
   }
 
-  // Extract content from Office files
-  static Future<String> _extractOfficeContent(
-    String fileUrl,
-    String fileType,
-  ) async {
+  static const String _proxyBaseUrl = 'http://localhost:3000';
+
+  // Extract content from Office files via Node proxy multipart upload
+  static Future<String> _extractOfficeContent({
+    required String fileUrl,
+    required String fileType,
+    required String fileName,
+  }) async {
+    final lowerType = fileType.toLowerCase();
+    final String endpoint;
+    switch (lowerType) {
+      case 'docx':
+        endpoint = '/extract-docx-text';
+        break;
+      case 'pptx':
+        endpoint = '/extract-pptx-text';
+        break;
+      case 'xlsx':
+        endpoint = '/extract-xlsx-text';
+        break;
+      default:
+        return 'Office file type $fileType is not supported for text extraction.';
+    }
+
     try {
-      if (kIsWeb) {
-        // For Office files on web, direct extraction is complex.
-        // We will return a placeholder message instead of calling a local server.
-        return 'Office document. Content can be analyzed through the file viewer interface.';
-      } else {
-        // For Office files, we'll return a description since direct text extraction
-        // requires specialized libraries
-        switch (fileType.toLowerCase()) {
-          case 'docx':
-            return 'Microsoft Word document. Content can be analyzed through the file viewer interface.';
-          case 'pptx':
-            return 'Microsoft PowerPoint presentation. Content can be analyzed through the file viewer interface.';
-          case 'xlsx':
-            return 'Microsoft Excel spreadsheet. Content can be analyzed through the file viewer interface.';
-          default:
-            return 'Office document. Content can be analyzed through the file viewer interface.';
+      final uri = Uri.parse('$_proxyBaseUrl$endpoint');
+      final request = http.MultipartRequest('POST', uri);
+
+      // Add URL field as fallback / direct reference for proxy
+      request.fields['url'] = fileUrl;
+      request.fields['fileType'] = lowerType;
+
+      // Download file bytes to upload as multipart/form-data
+      Uint8List? fileBytes;
+      try {
+        if (fileUrl.startsWith('http://') || fileUrl.startsWith('https://')) {
+          final downloadRes = await http.get(Uri.parse(fileUrl));
+          if (downloadRes.statusCode == 200) {
+            fileBytes = downloadRes.bodyBytes;
+          }
         }
+      } catch (dlErr) {
+        debugPrint(
+          'Client-side download error (will rely on URL field): $dlErr',
+        );
+      }
+
+      if (fileBytes != null && fileBytes.isNotEmpty) {
+        final uploadFileName =
+            fileName.isNotEmpty ? fileName : 'document.$lowerType';
+        request.files.add(
+          http.MultipartFile.fromBytes(
+            'file',
+            fileBytes,
+            filename: uploadFileName,
+          ),
+        );
+      }
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        try {
+          final decoded = json.decode(response.body);
+          if (decoded is Map<String, dynamic> && decoded.containsKey('text')) {
+            final extracted = decoded['text']?.toString() ?? '';
+            if (extracted.trim().isEmpty) {
+              return 'No extractable text found in this $fileType file.';
+            }
+            return extracted;
+          }
+        } catch (_) {
+          if (response.body.trim().isNotEmpty) {
+            return response.body;
+          }
+        }
+        return 'No extractable text found in this $fileType file.';
+      } else {
+        try {
+          final decoded = json.decode(response.body);
+          if (decoded is Map<String, dynamic> && decoded.containsKey('error')) {
+            return 'Failed to extract $fileType text: ${decoded['error']}';
+          }
+        } catch (_) {}
+        return 'Failed to extract $fileType text (HTTP ${response.statusCode}): ${response.body}';
       }
     } catch (e) {
-      return 'Error extracting Office content: ${e.toString()}';
+      return 'Error extracting Office content via proxy: ${e.toString()}';
     }
   }
 
@@ -243,18 +310,82 @@ ${folderName != null ? '- Folder: $folderName' : ''}
     }
   }
 
-  // NEW: bytes-based fallback when we have local file bytes (drag & drop)
+  // Bytes-based fallback when we have local file bytes (drag & drop)
   static Future<String> extractFromBytes({
     required Uint8List bytes,
     required String fileName,
     required String fileType,
   }) async {
+    final lower = fileType.toLowerCase();
+    if (['docx', 'pptx', 'xlsx'].contains(lower)) {
+      return await _extractOfficeContentFromBytes(
+        bytes: bytes,
+        fileName: fileName,
+        fileType: lower,
+      );
+    }
     // Try UTF‑8 decode; if it fails, return placeholder.
     try {
       final text = utf8.decode(bytes, allowMalformed: true);
       if (text.trim().isNotEmpty) return text;
     } catch (_) {}
-    // If you add PDF / DOCX parsing for raw bytes, hook it here.
     return '[Extracted $fileType content for $fileName is not plain text or needs specialized parser]';
+  }
+
+  static Future<String> _extractOfficeContentFromBytes({
+    required Uint8List bytes,
+    required String fileName,
+    required String fileType,
+  }) async {
+    final String endpoint;
+    switch (fileType) {
+      case 'docx':
+        endpoint = '/extract-docx-text';
+        break;
+      case 'pptx':
+        endpoint = '/extract-pptx-text';
+        break;
+      case 'xlsx':
+        endpoint = '/extract-xlsx-text';
+        break;
+      default:
+        return 'Office file type $fileType is not supported for text extraction.';
+    }
+
+    try {
+      final uri = Uri.parse('$_proxyBaseUrl$endpoint');
+      final request = http.MultipartRequest('POST', uri);
+      final uploadFileName =
+          fileName.isNotEmpty ? fileName : 'document.$fileType';
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'file',
+          bytes,
+          filename: uploadFileName,
+        ),
+      );
+
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        try {
+          final decoded = json.decode(response.body);
+          if (decoded is Map<String, dynamic> && decoded.containsKey('text')) {
+            final text = decoded['text']?.toString() ?? '';
+            return text.isNotEmpty
+                ? text
+                : 'No extractable text found in this $fileType file.';
+          }
+        } catch (_) {
+          if (response.body.trim().isNotEmpty) return response.body;
+        }
+        return 'No extractable text found in this $fileType file.';
+      } else {
+        return 'Failed to extract $fileType text from proxy (HTTP ${response.statusCode})';
+      }
+    } catch (e) {
+      return 'Error extracting $fileType content via proxy: ${e.toString()}';
+    }
   }
 }

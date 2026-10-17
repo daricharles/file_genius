@@ -122,28 +122,48 @@ async function downloadToTemp(url, ext) {
   return tempPath;
 }
 
+// Helper to extract text from a file path using officeparser
+function parseOfficeFile(tempPath, fileType, res) {
+  officeparser.parseOffice(tempPath, (err, data) => {
+    if (fs.existsSync(tempPath)) {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch (unlinkErr) {
+        console.warn(`[${fileType}] Failed to unlink temp file ${tempPath}:`, unlinkErr);
+      }
+    }
+    let text;
+    if (err && typeof err === 'string' && !data) {
+      text = err;
+      console.log(`[${fileType}] Extraction success, text length:`, text.length);
+      return res.json({ text });
+    }
+    if (err) {
+      console.error(`[${fileType}] Extraction error:`, err);
+      return res.status(500).json({ error: err.message || String(err) });
+    }
+    text = data || '';
+    console.log(`[${fileType}] Extraction success, text length:`, text.length);
+    res.json({ text });
+  });
+}
+
 // PPTX extraction endpoint
 app.post('/extract-pptx-text', async (req, res) => {
   try {
-    if (!req.body.url) return res.status(400).json({ error: 'No PPTX URL provided.' });
-    const tempPath = await downloadToTemp(req.body.url, 'pptx');
-    console.log(`[PPTX] Downloaded to: ${tempPath}`);
-    officeparser.parseOffice(tempPath, (err, data) => {
-      fs.unlinkSync(tempPath);
-      let text;
-      if (err && typeof err === 'string' && !data) {
-        text = err;
-        console.log('[PPTX] Extraction success, text length:', text.length);
-        return res.json({ text });
-      }
-      if (err) {
-        console.error('[PPTX] Extraction error:', err);
-        return res.status(500).json({ error: err.message || String(err) });
-      }
-      text = data;
-      console.log('[PPTX] Extraction success, text length:', text.length);
-      res.json({ text });
-    });
+    let tempPath;
+    const uploadedFile = req.files?.file || req.files?.fileUpload;
+    if (uploadedFile) {
+      tempPath = path.join(__dirname, `temp_file_${Date.now()}.pptx`);
+      fs.writeFileSync(tempPath, uploadedFile.data);
+      console.log(`[PPTX] Received multipart file upload, saved to: ${tempPath}`);
+    } else if (req.body?.url) {
+      tempPath = await downloadToTemp(req.body.url, 'pptx');
+      console.log(`[PPTX] Downloaded to: ${tempPath}`);
+    } else {
+      return res.status(400).json({ error: 'No PPTX file or URL provided.' });
+    }
+    parseOfficeFile(tempPath, 'PPTX', res);
   } catch (err) {
     console.error('[PPTX] Endpoint error:', err);
     res.status(500).json({ error: err.message });
@@ -153,25 +173,19 @@ app.post('/extract-pptx-text', async (req, res) => {
 // DOCX extraction endpoint
 app.post('/extract-docx-text', async (req, res) => {
   try {
-    if (!req.body.url) return res.status(400).json({ error: 'No DOCX URL provided.' });
-    const tempPath = await downloadToTemp(req.body.url, 'docx');
-    console.log(`[DOCX] Downloaded to: ${tempPath}`);
-    officeparser.parseOffice(tempPath, (err, data) => {
-      fs.unlinkSync(tempPath);
-      let text;
-      if (err && typeof err === 'string' && !data) {
-        text = err;
-        console.log('[DOCX] Extraction success, text length:', text.length);
-        return res.json({ text });
-      }
-      if (err) {
-        console.error('[DOCX] Extraction error:', err);
-        return res.status(500).json({ error: err.message || String(err) });
-      }
-      text = data;
-      console.log('[DOCX] Extraction success, text length:', text.length);
-      res.json({ text });
-    });
+    let tempPath;
+    const uploadedFile = req.files?.file || req.files?.fileUpload;
+    if (uploadedFile) {
+      tempPath = path.join(__dirname, `temp_file_${Date.now()}.docx`);
+      fs.writeFileSync(tempPath, uploadedFile.data);
+      console.log(`[DOCX] Received multipart file upload, saved to: ${tempPath}`);
+    } else if (req.body?.url) {
+      tempPath = await downloadToTemp(req.body.url, 'docx');
+      console.log(`[DOCX] Downloaded to: ${tempPath}`);
+    } else {
+      return res.status(400).json({ error: 'No DOCX file or URL provided.' });
+    }
+    parseOfficeFile(tempPath, 'DOCX', res);
   } catch (err) {
     console.error('[DOCX] Endpoint error:', err);
     res.status(500).json({ error: err.message });
@@ -181,25 +195,19 @@ app.post('/extract-docx-text', async (req, res) => {
 // XLSX extraction endpoint
 app.post('/extract-xlsx-text', async (req, res) => {
   try {
-    if (!req.body.url) return res.status(400).json({ error: 'No XLSX URL provided.' });
-    const tempPath = await downloadToTemp(req.body.url, 'xlsx');
-    console.log(`[XLSX] Downloaded to: ${tempPath}`);
-    officeparser.parseOffice(tempPath, (err, data) => {
-      fs.unlinkSync(tempPath);
-      let text;
-      if (err && typeof err === 'string' && !data) {
-        text = err;
-        console.log('[XLSX] Extraction success, text length:', text.length);
-        return res.json({ text });
-      }
-      if (err) {
-        console.error('[XLSX] Extraction error:', err);
-        return res.status(500).json({ error: err.message || String(err) });
-      }
-      text = data;
-      console.log('[XLSX] Extraction success, text length:', text.length);
-      res.json({ text });
-    });
+    let tempPath;
+    const uploadedFile = req.files?.file || req.files?.fileUpload;
+    if (uploadedFile) {
+      tempPath = path.join(__dirname, `temp_file_${Date.now()}.xlsx`);
+      fs.writeFileSync(tempPath, uploadedFile.data);
+      console.log(`[XLSX] Received multipart file upload, saved to: ${tempPath}`);
+    } else if (req.body?.url) {
+      tempPath = await downloadToTemp(req.body.url, 'xlsx');
+      console.log(`[XLSX] Downloaded to: ${tempPath}`);
+    } else {
+      return res.status(400).json({ error: 'No XLSX file or URL provided.' });
+    }
+    parseOfficeFile(tempPath, 'XLSX', res);
   } catch (err) {
     console.error('[XLSX] Endpoint error:', err);
     res.status(500).json({ error: err.message });

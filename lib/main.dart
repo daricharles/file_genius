@@ -739,7 +739,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  // Add this helper to keep dashboards/<uid> in sync with the counters
+  // Helper to keep user dashboard subcollection (users/<uid>/dashboard/stats) in sync with the counters
   Future<void> _syncDashboardToFirestore() async {
     if (_user == null) return;
     if (!_hasLoadedUserData) {
@@ -749,8 +749,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _endStudySession(flush: true);
     try {
       await FirebaseFirestore.instance
-          .collection('dashboards')
+          .collection('users')
           .doc(_user!.uid)
+          .collection('dashboard')
+          .doc('stats')
           .set({
             'filesUploaded': _filesUploaded,
             'aiChatInteractions': _aiChatInteractions,

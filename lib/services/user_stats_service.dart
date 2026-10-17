@@ -270,8 +270,10 @@ class UserStatsService extends ChangeNotifier {
 
     try {
       await FirebaseFirestore.instance
-          .collection('dashboards')
+          .collection('users')
           .doc(user.uid)
+          .collection('dashboard')
+          .doc('stats')
           .set(_buildUserDataMap(), SetOptions(merge: true));
     } catch (e) {
       debugPrint('Error syncing dashboard: $e');
